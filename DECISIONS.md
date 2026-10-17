@@ -23,3 +23,17 @@ Every choice I made while building this out, with the reason. Newest sections go
 8. Every pid is graded against the qid's `gold` field, which for ambiguous questions is the hash-chosen intended interpretation. So answering the raw question only scores when the model answered the reading the user meant, which is the frozen rule.
 
 9. Duplicate cache rows for a pid (an error row then a retry, say) resolve to the last non-error row, the same rule `cache_api.done_ids` uses.
+
+## Synthetic cache
+
+10. The synthetic world goes through the real code. Raw AmbigNQ-shaped rows are fed to `split.build`, so the fixture has the real file format, intent hashing and MANIFEST. Tier 1 and 2 rows are made by building a fake chat completion body and calling `cache_api.cache_row`, so their schema is the real one by construction. Tier 0 rows copy the Kaggle notebook dict key for key, and a test checks the keys against the notebook source.
+
+11. Answers are strings, not labels. grade.py decides correctness, so the synthetic pipeline exercises grading too. Correct answers are sometimes phrased loosely ("The X", "X (Y)", "It was X"), which pass lenient but fail EM, so the two metrics differ by a realistic margin.
+
+12. Latent model: each question has a difficulty z, and tier k succeeds on a clear prompt with probability sigmoid(a_k - z + noise). a_k is solved by bisection so clear-prompt accuracy is about 25, 40 and 55 percent. Measured after grading on the default world it's 27, 41 and 55. On the raw prompt of an ambiguous question the model first picks a reading uniformly, and only the intended one scores, which puts raw ambiguous accuracy at about 10, 15 and 22.
+
+13. Logprob confidence is a noisy, overconfident view of the same latent skill, and it stays high when the model confidently answers the wrong reading. Tier 0 self consistency samples split across readings on ambiguous raw prompts. The resulting signals are informative but far from perfect: AUROC about 0.68 for Tier 0 correctness from p_first, and about 0.67 for ambiguity from 1 - sc_agree. That's roughly what published work reports for real uncertainty signals, and it keeps the routing problem from being trivial.
+
+14. Default synthetic size is 3,000 train and 1,000 validation questions, so the whole pipeline runs in a few minutes on the laptop. About half the questions are ambiguous, close to AmbigNQ's rate.
+
+15. A small share (0.5 percent) of API rows get a preceding error row, like a failed call and a good retry, to exercise the dedupe rule. Pilot prompts are written as sync rows and the rest as batch rows, matching the real run plan.
