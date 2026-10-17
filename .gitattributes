@@ -1,0 +1,6 @@
+# Split and cache files are hashed in MANIFEST.json, so git must never rewrite their bytes
+data/** -text
+*.jsonl -text
+*.parquet binary
+*.pdf binary
+*.ipynb text eol=lf
