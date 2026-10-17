@@ -112,7 +112,7 @@ class DPOracle(Policy):
         delta = B / G
         b = np.arange(G + 1) * delta
         V = np.zeros((K + 1, G + 1))
-        Vp = np.full((K + 1, G + 1), -np.inf)
+        Vp = np.full((K + 1, G + 1), -1e9)
         b1 = b - self.c_probe
         probe_ok = self.w_probe <= b + 1e-15
         rem = b1[:, None, None] - self.c[None, :, :]                       # (G+1, S, A)
@@ -126,7 +126,8 @@ class DPOracle(Policy):
             Q = self.p[None] + _interp(prev, rem, delta)
             Q = np.where(feas, Q, -np.inf)
             best = Q.max(axis=2)                                           # (G+1, S)
-            vp = np.where(probe_ok, (np.where(np.isfinite(best), best, 0.0) * self.pi[None]).sum(axis=1), -np.inf)
+            # -1e9 rather than -inf marks "cannot probe", so interpolation never makes nan
+            vp = np.where(probe_ok, (np.where(np.isfinite(best), best, 0.0) * self.pi[None]).sum(axis=1), -1e9)
             vd = np.where(feas_d, self.pd[None] + _interp(prev, rem_d, delta), -np.inf).max(axis=1)
             Vp[n] = vp
             V[n] = np.maximum(np.maximum(prev, vd), vp)

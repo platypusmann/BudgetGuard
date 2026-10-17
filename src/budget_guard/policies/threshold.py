@@ -79,12 +79,12 @@ class Recorder:
         act = self.policy.decide(step)
         if step.stage == 0:
             m = step.active
-            self.rows0.append({"slack": step.left[m] / (step.n_left * self.u2), "left_frac": step.left[m] / step.B,
+            self.rows0.append({"slack": step.left[m] / (step.n_left * self.u2), "left_frac": step.left[m] / max(step.B, 1e-300),
                                "n_left_frac": np.full(m.sum(), step.n_left / step.K), "action": act[m]})
         if step.stage >= 1:
             m = step.active
             rec = {"slack": step.left[m] / (step.n_left * self.u2), "u": 1 - step.sig("p0")[m],
-                   "p_amb": step.sig("p_amb")[m], "left_frac": step.left[m] / step.B,
+                   "p_amb": step.sig("p_amb")[m], "left_frac": step.left[m] / max(step.B, 1e-300),
                    "n_left_frac": np.full(m.sum(), step.n_left / step.K), "action": act[m]}
             if self.keep_x0:
                 rec["x0"] = step.sig("x0")[m]

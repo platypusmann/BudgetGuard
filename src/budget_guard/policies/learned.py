@@ -87,7 +87,7 @@ class LearnedRouter(Policy):
         if self.first_const is not None:
             return np.full(E, self.first_const)
         X0 = np.column_stack([np.log(np.maximum(step.left / (step.n_left * self.u2), 0) + 1e-3),
-                              step.left / step.B, np.full(E, step.n_left / step.K)])
+                              step.left / max(step.B, 1e-300), np.full(E, step.n_left / step.K)])
         proba = self.first_model.predict_proba(X0)
         cls = self.first_model.classes_
         score = np.where(np.column_stack([step.feasible(int(a)) for a in cls]), proba, -np.inf)
@@ -98,7 +98,7 @@ class LearnedRouter(Policy):
             return self._first_move(step)
         p0, pa = step.sig("p0"), step.sig("p_amb")
         X = router_features(np.nan_to_num(step.sig("x0")), np.nan_to_num(p0), np.nan_to_num(pa),
-                            step.left / (step.n_left * self.u2), step.left / step.B,
+                            step.left / (step.n_left * self.u2), step.left / max(step.B, 1e-300),
                             np.full(len(step.idx), step.n_left / step.K))
         proba = self.model.predict_proba(X)
         score = np.full((len(step.idx), len(FINAL_ACTIONS)), -np.inf)
