@@ -1,0 +1,133 @@
+{
+  "data": "SYNTHETIC",
+  "data_dir": "data\\synthetic",
+  "eval_split": "test",
+  "metric": "lenient",
+  "config": {
+    "K": 100,
+    "episodes_per_seed": 100,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "tune_episodes": 100,
+    "fit_episodes": 60,
+    "bootstrap": 1000,
+    "metric": "lenient",
+    "batch_prices": false,
+    "budgets": [
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "clarify_fees": [
+      0.5,
+      1.0,
+      2.0
+    ],
+    "tier0_prices": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.02,
+        0.08
+      ],
+      [
+        0.05,
+        0.2
+      ]
+    ],
+    "sweep_budgets": [
+      0.1,
+      0.35,
+      0.75
+    ],
+    "dp": {
+      "grid": 800,
+      "conf_bins": 8,
+      "amb_bins": 3,
+      "prior_strength": 5
+    },
+    "fixed_threshold": {
+      "escalate_rate": 0.2,
+      "clarify_rate": 0.15
+    },
+    "slack_edges": [
+      0.0,
+      0.03,
+      0.06,
+      0.1,
+      0.2,
+      0.35,
+      0.6,
+      1.0
+    ]
+  },
+  "signal_auc_eval": {
+    "p0": 0.724,
+    "p_amb": 0.833,
+    "p1": 0.775
+  },
+  "pool_sizes": {
+    "tune": 938,
+    "test": 1000,
+    "calib": 2062
+  },
+  "dropped": {
+    "tune": 0,
+    "test": 0,
+    "calib": 0
+  },
+  "routellm": true,
+  "fits": {
+    "fee 1.0 price 0.02/0.08": {
+      "router_model": "mlp32",
+      "router_scores": {
+        "logistic": 0.3108,
+        "mlp32": 0.3141
+      },
+      "schedule_agreement": 0.7376576479465344
+    },
+    "fee 0.5 price 0.02/0.08": {
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.4054,
+        "mlp32": 0.398
+      },
+      "schedule_agreement": 0.6863586100593104
+    },
+    "fee 2.0 price 0.02/0.08": {
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.3519,
+        "mlp32": 0.3497
+      },
+      "schedule_agreement": 0.7408304731139377
+    },
+    "fee 1.0 price 0/0": {
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.3758,
+        "mlp32": 0.3709
+      },
+      "schedule_agreement": 0.7401440864518711
+    },
+    "fee 1.0 price 0.05/0.2": {
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.3717,
+        "mlp32": 0.365
+      },
+      "schedule_agreement": 0.7378905965474543
+    }
+  },
+  "seconds": 183.5
+}
