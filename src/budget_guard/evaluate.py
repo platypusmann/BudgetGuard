@@ -1,0 +1,240 @@
+"""Final evaluation: sweep budgets, clarify fees and Tier 0 prices, write CSVs and figures.
+
+Order of operations, which is what keeps test clean:
+  1. split.verify() and load the test qids
+  2. fit the shared signals on calib (asserts no test qid)
+  3. per (fee, price) config: fit and tune every policy on calib and tune only (asserts no test qid)
+  4. only then run every policy on the evaluation split streams
+
+Outputs in --out (default results/):
+  summary.csv        one row per config x policy x budget x masked
+  paired.csv         per-episode accuracy differences against threshold_fixed and threshold_tuned
+  soft_frontier.csv  the fixed-threshold rule swept with no cap, the average-cost frontier
+  schedule.csv       the fitted slack schedule, headline config
+  decisions_*.parquet  every decision for a few policies at one budget, headline config
+  run_info.json      settings, signal AUROCs, timings, synthetic flag
+  figures/           made by report.py
+
+  python -m budget_guard.evaluate --data-dir data/synthetic
+  python -m budget_guard.evaluate --eval-split tune          # development, never looks at test
+  python -m budget_guard.evaluate --quick                     # tiny settings, for tests
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+
+from . import episodes as ep
+from .common import DATA, ROOT
+from .features import load_embeddings, load_features
+from .leakage import assert_no_test, verify_and_test_qids
+from .policies import FitContext, build_all, fit_all
+from .policies.threshold import ESC_RATES, ThresholdRule
+from .signals import SignalModel
+from .synthetic import is_synthetic
+
+RESULTS = ROOT / "results"
+DECISION_LOG_POLICIES = ("threshold_fixed", "threshold_tuned", "dp_oracle", "learned_router")
+
+
+def bootstrap_ci(x: np.ndarray, n: int, seed: int = 0) -> tuple[float, float]:
+    """Percentile 95 percent CI of the mean, resampling episodes."""
+    if len(x) < 2 or n <= 0:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(seed)
+    means = x[rng.integers(0, len(x), size=(n, len(x)))].mean(axis=1)
+    return float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))
+
+
+def metrics(r: ep.RunResult, env: ep.Env, seeds: np.ndarray, n_boot: int) -> tuple[dict, np.ndarray]:
+    acc_e = r.correct.mean(axis=1)
+    lo, hi = bootstrap_ci(acc_e, n_boot)
+    amb = env.is_amb[r.episodes]
+    clar = r.clarified
+    tier = np.where(clar, r.final - ep.C0, r.final)
+    answered = r.final != ep.SKIP
+    total = r.total_spend
+    K = r.correct.shape[1]
+    seed_means = [acc_e[seeds == s].mean() for s in np.unique(seeds)]
+    return {
+        "accuracy": float(acc_e.mean()), "acc_ci_lo": lo, "acc_ci_hi": hi,
+        "acc_seed_sd": float(np.std(seed_means)) if len(seed_means) > 1 else float("nan"),
+        "spend_mean": float(total.mean()), "spend_p95": float(np.quantile(total, 0.95)),
+        "spend_per_q": float(total.mean() / K), "spend_frac_of_B": float(total.mean() / r.B) if r.B > 0 else float("nan"),
+        "violation_rate": float(r.violation.mean()),
+        "skip_rate": float((~answered).mean()), "downgrade_rate": float(r.downgraded.mean()),
+        "tier2_rate": float((answered & (tier == 2)).mean()), "tier1_rate": float((answered & (tier == 1)).mean()),
+        "probe_rate": float((r.probes > 0).mean()),
+        "clarify_rate": float(clar.mean()),
+        "clarify_precision": float(amb[clar].mean()) if clar.any() else float("nan"),
+        "clarify_recall": float(clar[amb].mean()) if amb.any() else float("nan"),
+    }, acc_e
+
+
+def build_envs(data_dir: Path, eval_split: str, metric: str, embed: str, test_qids):
+    feats = load_features(data_dir)
+    emb = None
+    if embed != "none":
+        try:
+            emb = load_embeddings(data_dir, embed)
+        except FileNotFoundError as e:
+            print(f"no embeddings, routellm skipped: {e}")
+    prices = ep.load_prices()
+    envs = {s: ep.Env(feats, s, prices, metric=metric, emb=emb) for s in {"calib", "tune", eval_split}}
+    del feats
+    sm = SignalModel().fit(envs["calib"], test_qids)
+    for e in envs.values():
+        sm.apply(e)
+    for s in ("calib", "tune"):
+        if envs[s].n == 0:
+            raise SystemExit(f"the {s} pool is empty. Is the full cache there, or only the pilot?")
+    return envs, sm, emb is not None
+
+
+def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids, n_boot, with_routellm,
+               out_dir, headline, verbose=True):
+    prices = ep.load_prices(tuple(t0_price), batch=cfg.get("batch_prices", False))
+    calib, tune, ev = (envs["calib"].with_prices(prices), envs["tune"].with_prices(prices),
+                       envs[eval_split].with_prices(prices))
+    K = int(cfg["K"])
+    u2 = calib.unit_cost()
+    fee = fee_mult * u2
+    budgets = [b * u2 * K for b in budgets_u2]
+    tune_eps = ep.sample_episodes(tune.n, K, int(cfg["tune_episodes"]), 1000, "tune")
+    fit_eps = ep.sample_episodes(calib.n, K, int(cfg["fit_episodes"]), 2000, "calib")
+    ctx = FitContext(calib, tune, fee, u2, K, budgets, tune_eps, fit_eps, cfg, test_qids)
+    if verbose:
+        print(f"  config fee {fee_mult}x u2, tier0 price {t0_price}: u2 = ${u2:.3e}, fee = ${fee:.3e}")
+    policies = fit_all(build_all(include_routellm=with_routellm), ctx, verbose=verbose)
+
+    # fitting is over. From here on the evaluation split is read, nothing is fitted
+    eval_eps = np.concatenate([ep.sample_episodes(ev.n, K, int(cfg["episodes_per_seed"]), s, eval_split)
+                               for s in cfg["seeds"]])
+    seeds = np.repeat(np.asarray(cfg["seeds"]), int(cfg["episodes_per_seed"]))
+    base = {"eval_split": eval_split, "metric": ev.metric, "fee_mult": fee_mult, "fee_usd": fee,
+            "tier0_price": f"{t0_price[0]:g}/{t0_price[1]:g}", "u2_usd": u2, "K": K, "n_episodes": len(eval_eps),
+            "headline": headline}
+    rows, paired_rows, acc_by = [], [], {}
+    for bu, B in zip(budgets_u2, budgets):
+        for p in policies:
+            modes = [True] if p.budget_aware else [True, False]
+            for masked in modes:
+                if getattr(p, "is_oracle", False):
+                    r = p.run(ev, eval_eps, B, fee)
+                else:
+                    r = ep.run(ev, p, eval_eps, B, fee, masked=masked)
+                m, acc_e = metrics(r, ev, seeds, n_boot)
+                rows.append({**base, "policy": p.name, "label": p.label, "budget_aware": p.budget_aware,
+                             "masked": masked, "budget_u2_per_q": bu, "budget_usd": B, "budget_usd_per_q": B / K, **m})
+                if masked:
+                    acc_by[(p.name, bu)] = acc_e
+                if masked and headline and bu == budgets_u2[len(budgets_u2) // 2] and p.name in DECISION_LOG_POLICIES:
+                    r.log_frame(ev).to_parquet(out_dir / f"decisions_{p.name}.parquet", index=False)
+        for ref in ("threshold_fixed", "threshold_tuned"):
+            a_ref = acc_by[(ref, bu)]
+            for p in policies:
+                if p.name == ref:
+                    continue
+                d = acc_by[(p.name, bu)] - a_ref
+                lo, hi = bootstrap_ci(d, n_boot, seed=1)
+                paired_rows.append({**base, "policy": p.name, "reference": ref, "budget_u2_per_q": bu,
+                                    "budget_usd": B, "diff_mean": float(d.mean()), "diff_ci_lo": lo,
+                                    "diff_ci_hi": hi, "share_episodes_better": float((d > 0).mean()),
+                                    "share_episodes_worse": float((d < 0).mean())})
+
+    soft_rows, schedule = [], None
+    if headline:
+        fixed = ctx.fitted["threshold_fixed"]
+        u = 1 - calib.signals["p0"][0]
+        rates = ESC_RATES
+        taus = [np.inf if r <= 0 else -np.inf if r >= 1 else float(np.quantile(u, 1 - r)) for r in rates]
+        for rate, tau in zip(rates, taus):
+            pol = ThresholdRule(tau, fixed.kappa)
+            pol.name = "soft_frontier"
+            r = ep.run(ev, pol, eval_eps, 1e9, fee, masked=False)
+            m, _ = metrics(r, ev, seeds, n_boot)
+            soft_rows.append({**base, "policy": "soft_frontier", "escalate_rate_calib": rate, **m})
+        schedule = ctx.fitted["slack_schedule"].table()
+    extras = {"router_model": getattr(ctx.fitted.get("learned_router"), "model_name", None),
+              "router_scores": getattr(ctx.fitted.get("learned_router"), "scores", None),
+              "schedule_agreement": getattr(ctx.fitted.get("slack_schedule"), "agreement", None)}
+    return rows, paired_rows, soft_rows, schedule, extras
+
+
+def main(argv=None) -> None:
+    import pandas as pd
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--data-dir", type=Path, default=DATA)
+    ap.add_argument("--out", type=Path, default=RESULTS)
+    ap.add_argument("--config", type=Path, default=None)
+    ap.add_argument("--eval-split", choices=["test", "tune"], default="test")
+    ap.add_argument("--metric", choices=["lenient", "em"], default=None)
+    ap.add_argument("--embed", choices=["hash", "minilm", "none"], default="hash")
+    ap.add_argument("--no-sweeps", action="store_true", help="headline config only")
+    ap.add_argument("--quick", action="store_true", help="tiny settings for tests and smoke runs")
+    ap.add_argument("--no-figures", action="store_true")
+    args = ap.parse_args(argv)
+    t_start = time.time()
+
+    test_qids = verify_and_test_qids(args.data_dir / "splits")    # rule 3, first thing
+    cfg = ep.load_experiment(args.config)
+    if args.quick:
+        cfg.update(K=20, episodes_per_seed=20, seeds=[0, 1], tune_episodes=20, fit_episodes=10, bootstrap=200,
+                   budgets=[0.05, 0.2, 0.75], sweep_budgets=[0.2], clarify_fees=[0.5, 1.0],
+                   tier0_prices=[[0.02, 0.08], [0.0, 0.0]])
+        cfg["dp"] = {**cfg["dp"], "grid": 200}
+    metric = args.metric or cfg.get("metric", "lenient")
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    envs, sm, with_routellm = build_envs(args.data_dir, args.eval_split, metric, args.embed, test_qids)
+    for s in ("calib", "tune"):
+        assert_no_test(envs[s].qids, test_qids, f"{s} pool")
+    synthetic = is_synthetic(args.data_dir)
+    print(f"evaluate on {args.eval_split} ({envs[args.eval_split].n} questions), metric {metric}, "
+          f"{'SYNTHETIC' if synthetic else 'REAL'} data")
+
+    default_fee, default_price = 1.0, [0.02, 0.08]
+    configs = [(default_fee, default_price, cfg["budgets"], True)]
+    if not args.no_sweeps:
+        configs += [(f, default_price, cfg["sweep_budgets"], False) for f in cfg["clarify_fees"] if f != default_fee]
+        configs += [(default_fee, p, cfg["sweep_budgets"], False) for p in cfg["tier0_prices"] if p != default_price]
+
+    rows, paired, soft, extras = [], [], [], {}
+    for fee_mult, price, budgets, headline in configs:
+        t = time.time()
+        r, pr, so, sched, ex = run_config(envs, args.eval_split, cfg, fee_mult, price, budgets, test_qids,
+                                          int(cfg["bootstrap"]), with_routellm, args.out, headline)
+        rows += r
+        paired += pr
+        soft += so
+        extras[f"fee {fee_mult} price {price[0]:g}/{price[1]:g}"] = ex
+        if sched is not None:
+            sched.to_csv(args.out / "schedule.csv", index=False)
+        print(f"  config done in {time.time() - t:.0f}s")
+
+    tag = "SYNTHETIC" if synthetic else "REAL"
+    for name, data in (("summary", rows), ("paired", paired), ("soft_frontier", soft)):
+        df = pd.DataFrame(data)
+        df.insert(0, "data", tag)
+        df.to_csv(args.out / f"{name}.csv", index=False)
+    info = {"data": tag, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
+            "config": cfg, "signal_auc_eval": sm.auc_report(envs[args.eval_split]),
+            "pool_sizes": {s: e.n for s, e in envs.items()},
+            "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
+            "fits": extras, "seconds": round(time.time() - t_start, 1)}
+    (args.out / "run_info.json").write_text(json.dumps(info, indent=2, default=str))
+    print(f"wrote {args.out} in {time.time() - t_start:.0f}s")
+
+    if not args.no_figures:
+        from .report import make_figures
+
+        make_figures(args.out)
+
+
+if __name__ == "__main__":
+    main()

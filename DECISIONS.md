@@ -97,3 +97,21 @@ Every choice I made while building this out, with the reason. Newest sections go
 41. Always Tier k has no clarify, on purpose. Those are single-action floors and ceilings. Every other policy can clarify.
 
 42. Policies that tune per budget store parameters per budget and look up the nearest tuned budget (in log space) when run at another. evaluate always tunes at exactly the budgets it evaluates.
+
+## Evaluation
+
+43. Configs: the headline config (clarify fee 1x u2, Tier 0 at 0.02/0.08) runs the full budget grid. The fee sweep (0.5x, 2x) and the Tier 0 price sweep (0, 0.05/0.20) each run at three budgets (0.1, 0.35, 0.75 u2 per question) to keep the laptop run to minutes. Every config refits and retunes every policy, since the best threshold depends on the fee and prices.
+
+44. Evaluation streams: 3 seeds times 100 episodes of 100 questions on the test split. Tuning uses 100 streams on tune (seed 1000), and the learned router's behaviour-cloning data is 60 DP rollouts per budget on calib (seed 2000). CIs are percentile bootstraps over the 300 episodes, 1000 resamples. Paired differences resample the per-episode accuracy difference, which works because every policy sees the same streams. I report differences against both the fixed threshold (as the brief asks) and the tuned threshold, since the tuned one is the fairer budget-blind baseline.
+
+45. Clarify precision is P(ambiguous | clarified) and recall is P(clarified | ambiguous), pooled over every question visit in every episode, against `is_ambiguous`.
+
+46. Budget-blind policies (always Tier k, both thresholds, random, the cascade and RouteLLM) are also run with masked=False, which shows what the cap is worth: their violation rate and p95 spend over B. Budget-aware policies only run masked.
+
+47. The soft frontier is the fixed-threshold rule with its clarify threshold kept and the escalation threshold swept over the 10 rates, run with no cap at all. That's the toy's Experiment 2, the accuracy-only frontier cascade papers report.
+
+48. Decision logs (every decision as a row) are written for the fixed threshold, tuned threshold, DP and learned router at the middle budget of the headline config. Logging every run would be tens of millions of rows. The runner can log any run through `RunResult.log_frame`.
+
+49. `--eval-split tune` exists for development, so I could look at numbers without touching test. The README results come from the one test run.
+
+50. Figures are static PNGs for the README. The seven routing policies get the first seven slots of a validated categorical palette, always in the same order, and floors, controls and bounds are gray. Every synthetic figure carries a red "SYNTHETIC DATA" stamp, and every CSV has a data column saying SYNTHETIC or REAL.

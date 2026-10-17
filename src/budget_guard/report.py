@@ -1,0 +1,251 @@
+"""Figures and the README table from the CSVs evaluate.py wrote. Rerunnable on its own:
+
+  python -m budget_guard.report --out results
+"""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+
+from .common import ROOT
+
+# categorical slots 1 to 7 of the reference palette, in fixed order, one per routing policy.
+# floors, controls and bounds are gray so the routing policies carry the color
+COLORS = {
+    "dp_oracle": "#2a78d6", "learned_router": "#eb6834", "slack_schedule": "#1baf7a",
+    "threshold_tuned": "#eda100", "cascade_frugal": "#e87ba4", "routellm": "#008300",
+    "threshold_fixed": "#6250d6",
+}
+GRAY = {"always_tier0": "#9a9893", "always_tier1": "#7c7a75", "always_tier2": "#5d5c58",
+        "random_matched": "#b5b3ad", "hindsight_oracle": "#3f3e3b"}
+LABEL = {
+    "dp_oracle": "DP oracle", "learned_router": "Learned router", "slack_schedule": "Slack schedule",
+    "threshold_tuned": "Threshold tuned per budget", "cascade_frugal": "FrugalGPT cascade",
+    "routellm": "RouteLLM-style", "threshold_fixed": "Fixed threshold (ReDAct)",
+    "always_tier0": "Always Tier 0", "always_tier1": "Always Tier 1", "always_tier2": "Always Tier 2",
+    "random_matched": "Random, matched spend", "hindsight_oracle": "Hindsight oracle",
+}
+INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
+TABLE_POLICIES = ["always_tier0", "always_tier1", "always_tier2", "random_matched", "threshold_fixed",
+                  "threshold_tuned", "cascade_frugal", "routellm", "slack_schedule", "learned_router",
+                  "dp_oracle", "hindsight_oracle"]
+
+
+def _style(ax, title, xlabel, ylabel):
+    ax.set_facecolor(SURFACE)
+    ax.set_title(title, loc="left", fontsize=11, color=INK)
+    ax.set_xlabel(xlabel, color=INK2, fontsize=9)
+    ax.set_ylabel(ylabel, color=INK2, fontsize=9)
+    ax.grid(True, color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    for s in ("left", "bottom"):
+        ax.spines[s].set_color(GRID)
+    ax.tick_params(colors=INK2, labelsize=8)
+
+
+def _stamp(fig, tag):
+    if tag == "SYNTHETIC":
+        fig.text(0.99, 0.01, "SYNTHETIC DATA, not real model results", ha="right", va="bottom",
+                 fontsize=9, color="#e34948", weight="bold")
+
+
+def _policy_line(ax, d, name, x, y="accuracy", ci=True):
+    d = d.sort_values(x)
+    color = COLORS.get(name, GRAY.get(name, INK2))
+    main = name in COLORS
+    style = "--" if name == "hindsight_oracle" else "-"
+    ax.plot(d[x], d[y], style, color=color, linewidth=2 if main else 1.5, marker="o", markersize=5 if main else 4,
+            markeredgecolor=SURFACE, markeredgewidth=1, label=LABEL.get(name, name), zorder=3 if main else 2)
+    if ci and "acc_ci_lo" in d and y == "accuracy":
+        ax.fill_between(d[x], d["acc_ci_lo"], d["acc_ci_hi"], color=color, alpha=0.12 if main else 0.06,
+                        linewidth=0, zorder=1)
+
+
+def make_figures(out: Path) -> list[Path]:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    out = Path(out)
+    figs = out / "figures"
+    figs.mkdir(parents=True, exist_ok=True)
+    s = pd.read_csv(out / "summary.csv")
+    tag = s["data"].iloc[0]
+    head = s[s["headline"] & s["masked"]]
+    soft = pd.read_csv(out / "soft_frontier.csv") if (out / "soft_frontier.csv").exists() else None
+    if soft is not None and len(soft) == 0:
+        soft = None
+    written = []
+
+    # 1. headline: cost versus accuracy, every policy under the hard cap, plus the uncapped soft frontier
+    fig, ax = plt.subplots(figsize=(9, 6), facecolor=SURFACE)
+    for name in list(GRAY) + list(COLORS)[::-1]:
+        d = head[head["policy"] == name]
+        if len(d):
+            _policy_line(ax, d, name, "spend_per_q")
+    if soft is not None:
+        sf = soft.sort_values("spend_per_q")
+        ax.plot(sf["spend_per_q"], sf["accuracy"], ":", color=INK2, linewidth=1.5, marker="s", markersize=4,
+                label="Soft frontier (fixed threshold, no cap)", zorder=2)
+    ax.set_xscale("log")
+    _style(ax, f"Cost versus accuracy under a hard cap ({head['K'].iloc[0]} questions per episode)",
+           "Mean spend per question, USD (log scale)", f"Accuracy ({head['metric'].iloc[0]})")
+    ax.legend(fontsize=8, frameon=False, loc="upper left", ncol=2)
+    _stamp(fig, tag)
+    fig.tight_layout()
+    p = figs / "headline_cost_vs_accuracy.png"
+    fig.savefig(p, dpi=150)
+    plt.close(fig)
+    written.append(p)
+
+    # 2. accuracy against the budget itself
+    fig, ax = plt.subplots(figsize=(9, 5.5), facecolor=SURFACE)
+    for name in list(GRAY) + list(COLORS)[::-1]:
+        d = head[head["policy"] == name]
+        if len(d):
+            _policy_line(ax, d, name, "budget_u2_per_q")
+    ax.set_xscale("log")
+    _style(ax, "Accuracy by hard budget", "Budget per question, in mean Tier 2 calls (log scale)",
+           f"Accuracy ({head['metric'].iloc[0]})")
+    ax.legend(fontsize=8, frameon=False, loc="upper left", ncol=2)
+    _stamp(fig, tag)
+    fig.tight_layout()
+    p = figs / "accuracy_vs_budget.png"
+    fig.savefig(p, dpi=150)
+    plt.close(fig)
+    written.append(p)
+
+    # 3. what the cap is worth: budget-blind policies run without the guard. Two panels, one measure each
+    un = s[s["headline"] & ~s["masked"]]
+    if len(un):
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), facecolor=SURFACE)
+        for name in ["threshold_fixed", "threshold_tuned", "cascade_frugal", "routellm", "always_tier2"]:
+            d = un[un["policy"] == name].sort_values("budget_u2_per_q")
+            if not len(d):
+                continue
+            color = COLORS.get(name, GRAY.get(name))
+            axes[0].plot(d["budget_u2_per_q"], d["violation_rate"], "-o", color=color, linewidth=2, markersize=5,
+                         markeredgecolor=SURFACE, label=LABEL[name])
+            axes[1].plot(d["budget_u2_per_q"], d["spend_p95"] / d["budget_usd"], "-o", color=color, linewidth=2,
+                         markersize=5, markeredgecolor=SURFACE, label=LABEL[name])
+        axes[1].axhline(1.0, color=INK2, linewidth=1, linestyle="--")
+        axes[1].text(axes[1].get_xlim()[0], 1.02, " the cap", color=INK2, fontsize=8, va="bottom")
+        for a in axes:
+            a.set_xscale("log")
+        _style(axes[0], "Episodes over the cap without the guard", "Budget per question (u2, log)", "Violation rate")
+        _style(axes[1], "95th percentile spend without the guard", "Budget per question (u2, log)", "p95 spend / budget")
+        axes[0].legend(fontsize=8, frameon=False)
+        _stamp(fig, tag)
+        fig.tight_layout()
+        p = figs / "unguarded_violations.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        written.append(p)
+
+    # 4. sweeps: clarify fee and Tier 0 price, small multiples per sweep budget
+    sw = s[s["masked"]]
+    key = ["threshold_fixed", "threshold_tuned", "cascade_frugal", "slack_schedule", "learned_router", "dp_oracle"]
+    for dim, xcol, fixed_col, fixed_val, fname, xlabel in (
+            ("fee", "fee_mult", "tier0_price", "0.02/0.08", "sweep_clarify_fee.png", "Clarify fee (mean Tier 2 calls)"),
+            ("price", "tier0_price", "fee_mult", 1.0, "sweep_tier0_price.png", "Tier 0 nominal price (USD per 1M in/out)")):
+        d = sw[sw[fixed_col] == fixed_val]
+        budgets = sorted(set(d[~d["headline"]]["budget_u2_per_q"]))
+        if not budgets or d[xcol].nunique() < 2:
+            continue
+        fig, axes = plt.subplots(1, len(budgets), figsize=(4.2 * len(budgets), 4), facecolor=SURFACE, squeeze=False)
+        for ax, b in zip(axes[0], budgets):
+            db = d[np.isclose(d["budget_u2_per_q"], b)]
+            order = sorted(db[xcol].unique(), key=lambda v: float(str(v).split("/")[0]))
+            for name in key:
+                dp = db[db["policy"] == name].set_index(xcol).reindex(order)
+                ax.plot(range(len(order)), dp["accuracy"], "-o", color=COLORS[name], linewidth=2, markersize=5,
+                        markeredgecolor=SURFACE, label=LABEL[name])
+            ax.set_xticks(range(len(order)), [str(o) for o in order])
+            _style(ax, f"Budget {b:g} u2 per question", xlabel, "Accuracy")
+        axes[0][0].legend(fontsize=7, frameon=False)
+        _stamp(fig, tag)
+        fig.tight_layout()
+        p = figs / fname
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        written.append(p)
+
+    # 5. decisions by slack, like Experiment 3 of the toy
+    logs = sorted(out.glob("decisions_*.parquet"))
+    if logs:
+        fig, ax = plt.subplots(figsize=(8, 4.5), facecolor=SURFACE)
+        u2 = s["u2_usd"].iloc[0]
+        edges = [0, 0.05, 0.1, 0.2, 0.35, 0.6, 1.0, np.inf]
+        labels = ["<0.05", "0.05-0.1", "0.1-0.2", "0.2-0.35", "0.35-0.6", "0.6-1", ">1"]
+        for path in logs:
+            lg = pd.read_parquet(path)
+            name = lg["policy"].iloc[0]
+            K = lg["t"].max() + 1
+            slack = lg["budget_before"] / ((K - lg["t"]) * u2)
+            b = pd.cut(slack, edges, labels=labels, right=False)
+            spend_t2 = lg["final"].isin(["T2", "C2"])
+            rate = spend_t2.groupby(b, observed=False).mean()
+            ax.plot(range(len(labels)), rate.reindex(labels).to_numpy(), "-o", color=COLORS.get(name, INK2),
+                    linewidth=2, markersize=5, markeredgecolor=SURFACE, label=LABEL.get(name, name))
+        ax.set_xticks(range(len(labels)), labels)
+        _style(ax, "Tier 2 use by remaining budget per remaining question",
+               "Slack, remaining budget per remaining question (u2)", "Share answered by Tier 2")
+        ax.legend(fontsize=8, frameon=False)
+        _stamp(fig, tag)
+        fig.tight_layout()
+        p = figs / "tier2_use_by_slack.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        written.append(p)
+
+    write_table(out)
+    print("figures:", ", ".join(str(w) for w in written))
+    return written
+
+
+def write_table(out: Path) -> Path:
+    """Markdown table of the headline config at three budgets, for the README."""
+    import pandas as pd
+
+    s = pd.read_csv(Path(out) / "summary.csv")
+    tag = s["data"].iloc[0]
+    head = s[s["headline"] & s["masked"]]
+    bs = sorted(head["budget_u2_per_q"].unique())
+    pick = [bs[0], bs[len(bs) // 2], bs[-1]] if len(bs) >= 3 else bs
+    lines = [f"Accuracy ({head['metric'].iloc[0]}) with bootstrap 95 percent CI, {tag} data, "
+             f"{head['eval_split'].iloc[0]} split, {int(head['n_episodes'].iloc[0])} episodes of "
+             f"{int(head['K'].iloc[0])} questions, clarify fee 1x u2, Tier 0 at 0.02/0.08. "
+             "Budget is per question in u2, the mean Tier 2 call cost. Violation rate is 0 for every row.", "",
+             "| Policy | " + " | ".join(f"budget {b:g} u2" for b in pick) + " |",
+             "|---|" + "---|" * len(pick)]
+    for name in TABLE_POLICIES:
+        cells = []
+        for b in pick:
+            r = head[(head["policy"] == name) & np.isclose(head["budget_u2_per_q"], b)]
+            if not len(r):
+                cells.append("")
+                continue
+            r = r.iloc[0]
+            cells.append(f"{r['accuracy']:.3f} ({r['acc_ci_lo']:.3f} to {r['acc_ci_hi']:.3f})")
+        lines.append(f"| {LABEL.get(name, name)} | " + " | ".join(cells) + " |")
+    assert (head["violation_rate"] == 0).all(), "a masked policy broke the cap"
+    p = Path(out) / "results_table.md"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--out", type=Path, default=ROOT / "results")
+    args = ap.parse_args(argv)
+    make_figures(args.out)
+
+
+if __name__ == "__main__":
+    main()
