@@ -115,3 +115,17 @@ Every choice I made while building this out, with the reason. Newest sections go
 49. `--eval-split tune` exists for development, so I could look at numbers without touching test. The README results come from the one test run.
 
 50. Figures are static PNGs for the README. The seven routing policies get the first seven slots of a validated categorical palette, always in the same order, and floors, controls and bounds are gray. Every synthetic figure carries a red "SYNTHETIC DATA" stamp, and every CSV has a data column saying SYNTHETIC or REAL.
+
+## Scripts, docs and the real run
+
+51. Stages run through `scripts/bg.py`, a small Python dispatcher, because Windows has no make by default. The Makefile is a thin wrapper over it for anyone who has make.
+
+52. `scripts/hand_check.py` prints a random sample of graded pilot answers per tier plus health numbers (model returned, missing logprobs, max-token hits, spend), for the hand check step of the runbook. It reads the cache, so it costs nothing.
+
+53. Real-run cost in the README comes from `cache_api.worst_case_cost` applied to the synthetic prompts (mean estimated input of about 74 tokens, which is close to real AmbigNQ question length), scaled to roughly 17,700 real prompts. Pilot worst case about $0.18 at standard prices, full batch about $3.45 more. The runbook makes `cache_api estimate` on the real splits the source of truth before any paid command.
+
+54. The synthetic results are committed under `results/` so the README figure renders from a clone, and every artifact is stamped SYNTHETIC. The real run overwrites the same files, and the runbook says to swap the README numbers then.
+
+55. The README says plainly that the soft frontier here is a weaker two-tier rule, so the hard-cap DP sits above it rather than below. The toy's "price of the guarantee" comparison needs an uncapped version of the DP, which isn't built.
+
+56. Two features stayed out of scope: the PPO-Lagrangian fine-tune of the learned router, and a DP that can probe Tier 1 before deciding. Both are listed as limitations rather than half-built.

@@ -47,10 +47,12 @@ def _style(ax, title, xlabel, ylabel):
     ax.tick_params(colors=INK2, labelsize=8)
 
 
-def _stamp(fig, tag):
+def _stamp(fig, tag, bottom: float = 0.0):
+    """Mark synthetic figures in the top right corner, then lay out around it."""
     if tag == "SYNTHETIC":
-        fig.text(0.99, 0.01, "SYNTHETIC DATA, not real model results", ha="right", va="bottom",
+        fig.text(0.99, 0.995, "SYNTHETIC DATA, not real model results", ha="right", va="top",
                  fontsize=9, color="#e34948", weight="bold")
+    fig.tight_layout(rect=(0, bottom, 1, 0.95))
 
 
 def _policy_line(ax, d, name, x, y="accuracy", ci=True):
@@ -98,7 +100,6 @@ def make_figures(out: Path) -> list[Path]:
            "Mean spend per question, USD (log scale)", f"Accuracy ({head['metric'].iloc[0]})")
     ax.legend(fontsize=8, frameon=False, loc="upper left", ncol=2)
     _stamp(fig, tag)
-    fig.tight_layout()
     p = figs / "headline_cost_vs_accuracy.png"
     fig.savefig(p, dpi=150)
     plt.close(fig)
@@ -115,7 +116,6 @@ def make_figures(out: Path) -> list[Path]:
            f"Accuracy ({head['metric'].iloc[0]})")
     ax.legend(fontsize=8, frameon=False, loc="upper left", ncol=2)
     _stamp(fig, tag)
-    fig.tight_layout()
     p = figs / "accuracy_vs_budget.png"
     fig.savefig(p, dpi=150)
     plt.close(fig)
@@ -135,14 +135,14 @@ def make_figures(out: Path) -> list[Path]:
             axes[1].plot(d["budget_u2_per_q"], d["spend_p95"] / d["budget_usd"], "-o", color=color, linewidth=2,
                          markersize=5, markeredgecolor=SURFACE, label=LABEL[name])
         axes[1].axhline(1.0, color=INK2, linewidth=1, linestyle="--")
-        axes[1].text(axes[1].get_xlim()[0], 1.02, " the cap", color=INK2, fontsize=8, va="bottom")
         for a in axes:
             a.set_xscale("log")
+        # x in axes fraction, y in data units, so the label sits on the cap line whatever the x scale
+        axes[1].text(0.01, 1.02, "the cap", color=INK2, fontsize=8, va="bottom", transform=axes[1].get_yaxis_transform())
         _style(axes[0], "Episodes over the cap without the guard", "Budget per question (u2, log)", "Violation rate")
         _style(axes[1], "95th percentile spend without the guard", "Budget per question (u2, log)", "p95 spend / budget")
-        axes[0].legend(fontsize=8, frameon=False)
+        axes[1].legend(fontsize=8, frameon=False, loc="upper right")
         _stamp(fig, tag)
-        fig.tight_layout()
         p = figs / "unguarded_violations.png"
         fig.savefig(p, dpi=150)
         plt.close(fig)
@@ -168,9 +168,9 @@ def make_figures(out: Path) -> list[Path]:
                         markeredgecolor=SURFACE, label=LABEL[name])
             ax.set_xticks(range(len(order)), [str(o) for o in order])
             _style(ax, f"Budget {b:g} u2 per question", xlabel, "Accuracy")
-        axes[0][0].legend(fontsize=7, frameon=False)
-        _stamp(fig, tag)
-        fig.tight_layout()
+        handles, labels = axes[0][0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=8, frameon=False)
+        _stamp(fig, tag, bottom=0.08)
         p = figs / fname
         fig.savefig(p, dpi=150)
         plt.close(fig)
@@ -198,7 +198,6 @@ def make_figures(out: Path) -> list[Path]:
                "Slack, remaining budget per remaining question (u2)", "Share answered by Tier 2")
         ax.legend(fontsize=8, frameon=False)
         _stamp(fig, tag)
-        fig.tight_layout()
         p = figs / "tier2_use_by_slack.png"
         fig.savefig(p, dpi=150)
         plt.close(fig)
