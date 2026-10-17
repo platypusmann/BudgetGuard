@@ -37,3 +37,13 @@ Every choice I made while building this out, with the reason. Newest sections go
 14. Default synthetic size is 3,000 train and 1,000 validation questions, so the whole pipeline runs in a few minutes on the laptop. About half the questions are ambiguous, close to AmbigNQ's rate.
 
 15. A small share (0.5 percent) of API rows get a preceding error row, like a failed call and a good retry, to exercise the dedupe rule. Pilot prompts are written as sync rows and the rest as batch rows, matching the real run plan.
+
+## Features
+
+16. features.py keeps one row per pid with only what policies and grading need: question metadata, per-tier token counts, the cost as charged, logprob features, grades, Tier 0 self consistency and cross-tier agreement. No answer strings. It's about 1.5 MB on the synthetic world and should stay under 10 MB on the real one.
+
+17. Cross-tier agreement (agree_01, agree_02, agree_12) is in the table, but a policy may only read agree_0k after it has paid for tier k. The runner enforces this by masking every signal of an unrevealed tier.
+
+18. Embeddings: MiniLM (all-MiniLM-L6-v2) when `--embed minilm` is passed, which needs sentence-transformers and a one-time model download. The default is a deterministic word and bigram hashing embedding (512 dims, sklearn HashingVectorizer), because the brief says everything must run offline and tests can't download a model. Neither one is fitted, so neither can leak test information. The RouteLLM-style baseline works with either.
+
+19. Cost columns stay float64 (prices around 1e-6 dollars lose digits in float32), everything else float32.
