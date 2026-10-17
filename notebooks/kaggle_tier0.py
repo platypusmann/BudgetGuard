@@ -9,9 +9,9 @@
 import os, json, math, re, string, time, glob, hashlib
 
 MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
-PROMPTS_GLOB = "/kaggle/input/*/prompts.jsonl"
+PROMPTS_GLOB = "/kaggle/input/**/prompts.jsonl"   # ** because Kaggle may mount at /kaggle/input/datasets/<user>/<name>/
 OUT = "/kaggle/working/tier0.jsonl"
-PRIOR_OUTPUT_GLOB = "/kaggle/input/*/tier0.jsonl"      # previous run output, if attached
+PRIOR_OUTPUT_GLOB = "/kaggle/input/**/tier0.jsonl"      # previous run output, if attached
 HF_MIRROR_REPO = None          # e.g. "ranveerbhasin/budget-guard-tier0", private dataset. None disables.
 PILOT_ONLY = True              # first run True, check results, then False for everything
 SPLITS = {"calib", "tune", "test"}
@@ -53,7 +53,7 @@ def shard_of(pid):
 def restore_prior():
     """Merge rows from the attached previous output and the HF mirror into OUT, deduplicated."""
     have = {r["pid"] for r in iter_jsonl(OUT)}
-    sources = glob.glob(PRIOR_OUTPUT_GLOB)
+    sources = glob.glob(PRIOR_OUTPUT_GLOB, recursive=True)
     if HF_MIRROR_REPO and os.environ.get("HF_TOKEN"):
         try:
             from huggingface_hub import hf_hub_download
@@ -111,7 +111,7 @@ except Exception:
     pass
 
 done = restore_prior()
-prompts_path = sorted(glob.glob(PROMPTS_GLOB))[0]
+prompts_path = sorted(glob.glob(PROMPTS_GLOB, recursive=True))[0]
 todo = [p for p in iter_jsonl(prompts_path)
         if p["split"] in SPLITS and (p["pilot"] or not PILOT_ONLY)
         and p["pid"] not in done and shard_of(p["pid"]) == SHARD_ID]
