@@ -40,7 +40,7 @@ SYNTH_DIR = DATA / "synthetic"
 TARGET_ACC = {"tier0": 0.25, "tier1": 0.40, "tier2": 0.55}
 SKILL_NOISE = 0.6
 # confidence = gain * skill + bias + noise. bias > 0 means overconfident, as LLMs are
-CONF = {"tier0": (0.8, 1.0, 0.9), "tier1": (0.9, 1.0, 0.8), "tier2": (1.0, 1.0, 0.7)}
+CONF = {"tier0": (0.8, 1.0, 0.6), "tier1": (0.9, 1.0, 0.55), "tier2": (1.0, 1.0, 0.5)}
 ERROR_ROW_RATE = 0.005  # api tiers only, a failed call followed by a good retry
 
 # question templates: (text, p_ambiguous, difficulty offset)
