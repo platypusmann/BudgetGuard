@@ -34,6 +34,9 @@ Policies compared:
 - Slack threshold schedule fitted to the DP, the proposal's interpretable method
 - Learned router, behaviour cloned from the DP, with remaining budget per remaining question as an input
 - Hindsight oracle, which knows every answer, as the upper bound
+- Two clarify references built on the same DP: clarify every question (blind), and an ambiguity oracle that clarifies exactly when the question is ambiguous
+
+The DP and the learned router also get a free ambiguity score from the question text alone (hand features plus a sentence embedding, fitted on calib), which they can use before paying for any call.
 
 Everything is fitted on calib, tuned on tune, and the test split is only read in the final evaluate step. Every entry point verifies the frozen split hashes first and asserts that no test question reaches fitting data. DECISIONS.md logs every choice along the way.
 
@@ -53,18 +56,21 @@ Accuracy (lenient match, pre-registered) on the test split, 300 episodes of 100 
 | Threshold tuned per budget | 0.184 (0.180 to 0.188) | 0.267 (0.263 to 0.272) | 0.428 (0.423 to 0.432) |
 | FrugalGPT cascade | 0.185 (0.181 to 0.190) | 0.299 (0.295 to 0.304) | 0.438 (0.432 to 0.443) |
 | RouteLLM-style | 0.206 (0.201 to 0.210) | 0.277 (0.272 to 0.281) | 0.404 (0.399 to 0.409) |
-| Slack schedule | 0.202 (0.198 to 0.206) | 0.331 (0.327 to 0.335) | 0.416 (0.410 to 0.422) |
-| Learned router | 0.198 (0.194 to 0.202) | 0.346 (0.342 to 0.351) | 0.441 (0.437 to 0.446) |
-| DP oracle | 0.198 (0.193 to 0.202) | 0.344 (0.339 to 0.348) | 0.442 (0.437 to 0.446) |
+| Slack schedule | 0.196 (0.192 to 0.200) | 0.328 (0.324 to 0.333) | 0.435 (0.430 to 0.440) |
+| Learned router | 0.202 (0.197 to 0.206) | 0.342 (0.337 to 0.347) | 0.439 (0.434 to 0.444) |
+| DP oracle | 0.202 (0.198 to 0.206) | 0.330 (0.325 to 0.334) | 0.433 (0.427 to 0.438) |
+| Clarify every question (blind) | 0.005 (0.004 to 0.005) | 0.174 (0.171 to 0.177) | 0.392 (0.387 to 0.397) |
+| Ambiguity oracle (clarify iff ambiguous) | 0.183 (0.179 to 0.187) | 0.358 (0.353 to 0.363) | 0.485 (0.480 to 0.489) |
 | Hindsight oracle | 0.374 (0.369 to 0.378) | 0.672 (0.668 to 0.676) | 0.729 (0.725 to 0.734) |
 
 What the synthetic run says, for what it's worth before real data:
 
 - The toy's story holds. The fixed threshold fails in both directions. At tight budgets it spends early and runs dry (0.101, worse than always Tier 0). At loose budgets it can't use the money (stuck at 0.222).
-- Budget-aware policies win in the middle of the range. At 0.35 u2 the DP beats the threshold tuned for that exact budget by 7.6 points (paired 95 percent CI 7.0 to 8.2) and the fixed threshold by 12.6 points (12.0 to 13.2).
-- Averaged over the 8 budgets, the learned router closes 99 percent of the gap between the fixed threshold and the DP, the slack schedule 94 percent, the cascade 87 and the tuned threshold 59. That ordering is close to the toy's (tuned threshold 61, schedule 93).
+- Budget-aware policies win in the middle of the range. At 0.35 u2 the DP beats the threshold tuned for that exact budget by 6.2 points (paired 95 percent CI 5.7 to 6.7) and the fixed threshold by 11.2 points (10.6 to 11.8).
+- Averaged over the 8 budgets, the learned router closes 102 percent of the gap between the fixed threshold and the DP (it edges the DP), the slack schedule 98 percent, the cascade 91 and the tuned threshold 61. That ordering is close to the toy's (tuned threshold 61, schedule 93).
 - The guard matters. Run without masking, the fixed and tuned thresholds go over the cap in 100 percent of episodes at budgets up to 0.2 u2, with p95 spend up to 24 times the budget.
-- Clarify is used with good precision but modest recall. The DP clarifies 14 percent of questions at 0.35 u2, and 89 percent of those really are ambiguous, but it only catches 27 percent of the ambiguous ones, because the fee competes with Tier 2 calls.
+- Clarify is used with good precision but modest recall. The DP clarifies 13 percent of questions at 0.35 u2, and 81 percent of those really are ambiguous, but it only catches 23 percent of the ambiguous ones, because the fee competes with Tier 2 calls.
+- Knowing ambiguity exactly is worth a few points. The ambiguity oracle beats the DP by 2.8 points at 0.35 u2 and 5.2 at 1 u2. On a scale where blind clarify-all is 0 and the oracle is 1, the DP sits at 0.85 and the learned router at 0.92 at 0.35 u2 (`results/clarify_reference.csv`).
 
 Other figures in `results/figures`: accuracy by budget, violations and p95 spend without the guard, the clarify fee and Tier 0 price sweeps, and Tier 2 use by remaining slack. Full numbers are in `results/summary.csv` and `results/paired.csv`.
 
@@ -124,7 +130,8 @@ research/poc/               the SIT320 proposal, comparison note and toy noteboo
 - These numbers are synthetic. The generator is tuned to land near realistic accuracies (about 25, 40 and 55 percent on clear prompts) and realistic signal quality (AUROC about 0.73 for Tier 0 confidence), but the shape of the results depends on modelling choices I made, such as difficulty shared across tiers. Treat it as a test that the machinery works and a forecast to check, not a finding.
 - This is a reframing of the SIT320 formulation, not the formulation itself. The proposal is about multi-step tool-using agents, where one failed step ends the task, the reward is a product over steps, and clarifying helps every remaining step. Here each question is single-turn, the reward is the number correct over a stream (additive), and a clarification only helps the question it was asked on. The remaining budget plays the same role in the state, and the DP, the monotonicity lemma and the hard cap carry over, but the dependence between steps, which is what made the toy interesting, is gone. Irreversible actions and the post-hoc abstention failure mode aren't tested at all.
 - That reframing puts this close to TREACLE, which also learns a budget-constrained policy over a stream of independent questions with remaining budget in the state. The differences are the clarify action priced against escalation, the hard per-episode cap enforced by worst-case masking rather than an average, and the exact DP and slack-schedule baselines from the proposal. That's a modest step from TREACLE, not a new problem. The multi-step agent setting from the proposal is still the open part.
-- The DP is exact for its own model (Tier 0 signal in 24 bins, mean costs), not for the world. The cascade, which also sees Tier 1's confidence, ties it at the two loosest budgets, and the learned router matches or slightly beats it at several budgets.
+- Detecting ambiguity is the weak link on real data. On the 300-question pilot, Tier 0 self consistency and cross-tier agreement carry no ambiguity signal (AUROC about 0.5), and the free text detector reaches 0.65 on real tune. The synthetic world assumed more (0.81 for the Tier 0 belief), so expect the clarify gains above to shrink on real data.
+- The DP is exact for its own model (Tier 0 signal in 24 bins, mean costs), not for the world. The cascade, which also sees Tier 1's confidence, ties or slightly beats it at the two loosest budgets, and the learned router matches or slightly beats it at most budgets.
 - The learned router is behaviour cloning only. The PPO-Lagrangian fine-tune from the proposal isn't implemented, and with masking already enforcing the cap it would only change how well the router spends, not whether it obeys the cap.
 - Clarification is simulated as a perfect user. The answer to a clarifying question is always the hash-chosen intended reading, at a fixed fee. Real users are slower, sometimes vague, and the fee is a modelling choice, which is why it's swept.
 - Unlike the toy, the hard-cap DP doesn't sit below a soft frontier here. The soft frontier is the two-tier fixed threshold with no cap, which is a weaker rule than the three-tier DP, so the toy's "price of the guarantee" can't be read off this figure. A fair version would need an uncapped DP, which isn't built yet.
