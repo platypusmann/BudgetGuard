@@ -1,8 +1,10 @@
 """Final evaluation: sweep budgets, clarify fees and Tier 0 prices, write CSVs and figures.
 
 Order of operations, which is what keeps test clean:
-  0. hash the experiment design and print it in the header. On real data, refuse unless it is the
-     frozen design in configs/experiment.sha256 and no --quick overrides are in play
+  0. check the caches are complete (completeness.py) and hash the experiment design, printing it
+     in the header. On real data, refuse on any missing pid, unresolved error or wrong prompt
+     version, and refuse unless the design is the frozen design in configs/experiment.sha256
+     and no --quick overrides are in play
   1. split.verify() and load the test qids
   2. fit the shared signals on calib (asserts no test qid)
   3. per (fee, price) config: fit and tune every policy on calib and tune only (asserts no test qid)
@@ -34,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import design
+from . import completeness, design
 from . import episodes as ep
 from .common import DATA, ROOT
 from .features import load_embeddings, load_features
@@ -266,6 +268,10 @@ def main(argv=None) -> None:
                          f"configs/experiment.sha256 says {design.locked_hash()}, this run is {stamp}")
 
     test_qids = verify_and_test_qids(args.data_dir / "splits")    # rule 3, first thing
+    problems, cache_report = completeness.check_cache(args.data_dir)
+    print("cache completeness:\n" + completeness.describe(cache_report))
+    if problems and not synthetic:
+        raise SystemExit("refusing to evaluate an incomplete real cache:\n  " + "\n  ".join(problems))
     cfg = ep.load_experiment(args.config)
     if args.quick:
         cfg.update(K=20, episodes_per_seed=20, seeds=[0, 1], tune_episodes=20, fit_episodes=10, bootstrap=200,
@@ -307,7 +313,8 @@ def main(argv=None) -> None:
         df.insert(0, "data", tag)
         df.insert(1, "design_sha256", stamp)
         df.to_csv(args.out / f"{name}.csv", index=False)
-    info = {"data": tag, "design_sha256": stamp, "design_frozen": frozen and not args.quick, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
+    info = {"data": tag, "design_sha256": stamp, "design_frozen": frozen and not args.quick,
+            "cache_completeness": cache_report, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
             "config": cfg, "signal_auc_eval": sm.auc_report(envs[args.eval_split]),
             "pool_sizes": {s: e.n for s, e in envs.items()},
             "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
