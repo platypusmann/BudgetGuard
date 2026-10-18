@@ -12,7 +12,10 @@ def test_pilot_check_runs_on_pilot_only(world, tmp_path):
     a = df[df["kind"] == "auroc"]
     assert (a["n"] <= len(pilot)).all()
     assert set(a["target"]) == {"raw_answer_correct", "is_ambiguous"}
-    assert len(a) == 2 * (6 + 4 + 4)
+    assert len(a[a["tier"] != "cross"]) == 2 * (6 + 4 + 4)
+    cross = a[a["tier"] == "cross"].set_index("feature")
+    assert set(cross.index) == {"agree_12", "agree_0_12"} and (cross["target"] == "is_ambiguous").all()
+    assert cross[["agree_rate_ambiguous", "agree_rate_clear"]].notna().all().all()
     g = df[df["kind"] == "clarify_gain"]
     assert set(g["tier"]) == {"tier0", "tier1", "tier2"}
     assert (g["n"] == sum(r["is_ambiguous"] for r in pilot)).all()

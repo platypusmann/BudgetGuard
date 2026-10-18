@@ -8,6 +8,10 @@ Answers two questions before the full run, with honest uncertainty:
      AUROC is reported as is. Below 0.5 means the feature runs the other way (entropy should).
   2. Does clarifying help? Per tier, on ambiguous pilot questions, the mean accuracy of the
      clarified prompt minus the raw prompt, with a paired bootstrap CI over questions.
+  3. Does cross-tier agreement on the raw prompt flag ambiguity? agree_12 is whether the Tier 1
+     and Tier 2 answers match after SQuAD normalization, agree_0_12 whether the Tier 0 greedy
+     answer matches either. Disagreement should mean ambiguity, so AUROC below 0.5 is the
+     expected direction. Note agree_12 needs both paid tiers, so it is not a free signal.
 
 The pilot is 300 questions (about 130 ambiguous), so CIs are wide. Treat this as a sanity
 check, not a result.
@@ -110,6 +114,7 @@ def run(data_dir: Path = DATA, out: Path = ROOT / "results", n_boot: int = 2000,
                          "metric": metric, "n": len(amb), "n_pos": int((d > 0).sum()), "value": float(d.mean()),
                          "ci_lo": lo, "ci_hi": hi})
 
+    rows += _agreement_rows(data_dir, pilot, n_boot)
     df = pd.DataFrame(rows)
     df.insert(0, "data", "SYNTHETIC" if is_synthetic(data_dir) else "REAL")
     out.mkdir(parents=True, exist_ok=True)
@@ -119,16 +124,52 @@ def run(data_dir: Path = DATA, out: Path = ROOT / "results", n_boot: int = 2000,
     return df
 
 
+def _agreement_rows(data_dir: Path, pilot: dict, n_boot: int) -> list[dict]:
+    """AUROC of cross-tier answer agreement on the raw prompt for predicting is_ambiguous."""
+    norm = {}
+    for tier in TIERS:
+        try:
+            g = load_graded(tier, data_dir)
+        except Exception:
+            return []
+        if g.empty:
+            return []
+        norm[tier] = dict(zip(g["pid"], g["answer_norm"]))
+    qs = [q for q in pilot if all(f"{q}::orig" in norm[t] for t in TIERS)]
+    if not qs:
+        return []
+    a = {t: [norm[t][f"{q}::orig"] for q in qs] for t in TIERS}
+    same = lambda x, y: bool(x) and x == y  # noqa: E731, an empty answer agrees with nothing
+    feats = {
+        "agree_12": np.array([same(x, y) for x, y in zip(a["tier1"], a["tier2"])], float),
+        "agree_0_12": np.array([same(z, x) or same(z, y) for z, x, y in zip(a["tier0"], a["tier1"], a["tier2"])], float),
+    }
+    y = np.array([pilot[q]["is_ambiguous"] for q in qs], bool)
+    rows = []
+    for j, (name, x) in enumerate(feats.items()):
+        lo, hi = boot_auroc(x, y, n_boot, seed=700 + j)
+        rows.append({"kind": "auroc", "tier": "cross", "feature": name, "target": "is_ambiguous", "metric": "",
+                     "n": len(qs), "n_pos": int(y.sum()), "value": auroc(x, y), "ci_lo": lo, "ci_hi": hi,
+                     "agree_rate_ambiguous": float(x[y].mean()), "agree_rate_clear": float(x[~y].mean())})
+    return rows
+
+
 def _print(df, n_pilot: int, path: Path) -> None:
     fmt = lambda r: f"{r.value:.2f} [{r.ci_lo:.2f}, {r.ci_hi:.2f}]"  # noqa: E731
     a = df[df["kind"] == "auroc"]
     print(f"\nPilot signal check, {df['data'].iloc[0]} data, {n_pilot} calib pilot questions, "
           f"metric {df['metric'].iloc[0]}. AUROC [bootstrap 95 percent CI]")
     print(f"{'tier':6s} {'feature':14s} {'predicts raw answer correct':>28s} {'predicts is_ambiguous':>24s}")
-    for (tier, feat), g in a.groupby(["tier", "feature"], sort=False):
+    for (tier, feat), g in a[a["tier"] != "cross"].groupby(["tier", "feature"], sort=False):
         c = g[g["target"] == "raw_answer_correct"].iloc[0]
         m = g[g["target"] == "is_ambiguous"].iloc[0]
         print(f"{tier:6s} {feat:14s} {fmt(c):>28s} {fmt(m):>24s}")
+    cross = a[a["tier"] == "cross"]
+    if len(cross):
+        print("\nCross-tier agreement on the raw prompt, predicting is_ambiguous")
+        for r in cross.itertuples():
+            print(f"  {r.feature:11s} AUROC {fmt(r)}   agrees on {r.agree_rate_ambiguous:.0%} of ambiguous, "
+                  f"{r.agree_rate_clear:.0%} of clear questions")
     gain = df[df["kind"] == "clarify_gain"]
     if len(gain):
         print("\nClarified minus raw accuracy on ambiguous pilot questions [paired bootstrap 95 percent CI]")
