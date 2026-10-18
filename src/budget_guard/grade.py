@@ -6,8 +6,14 @@ Three scores per answer, all max over gold aliases:
   lenient   normalized gold appears as a contiguous token run inside a prediction
             of at most len(gold) + LENIENT_SLACK tokens, so "the Eiffel Tower in Paris"
             passes for gold "Eiffel Tower" but a rambling list of guesses does not
+  lenient_plus  lenient after two more normalizations on both sides: ordinal suffixes are
+            stripped from numbers (78th is 78) and full day-month-year dates are rewritten to
+            one canonical token (1 July 2017, July 1 2017 and July 1, 2017 all match).
+            Anything lenient accepts also passes. Nothing else: no synonyms, no partial
+            dates, no looser containment
 
-The primary metric is pre-registered in DECISIONS.md (lenient). EM is the robustness check.
+The primary metric is pre-registered in DECISIONS.md (lenient). EM and lenient_plus are
+secondary. lenient_plus was added after the pilot hand check, see DECISIONS.md.
 
 Every pid, raw or clarified, is graded against row["gold"] for its qid. For an ambiguous
 question that is the intended interpretation's answers, so answering the raw question only
@@ -96,10 +102,72 @@ def lenient_match(pred: str | None, golds: Iterable[str], slack: int = LENIENT_S
     return False
 
 
+_ORDINAL = re.compile(r"^(\d+)(st|nd|rd|th)$")
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+     "november", "december"])}
+_MONTHS.update({"jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "sept": 9,
+                "oct": 10, "nov": 11, "dec": 12})
+
+
+def _day(tok: str) -> int | None:
+    return int(tok) if tok.isdigit() and len(tok) <= 2 and 1 <= int(tok) <= 31 else None
+
+
+def _year(tok: str) -> int | None:
+    return int(tok) if tok.isdigit() and len(tok) == 4 else None
+
+
+def _plus_tokens(s: str | None) -> list[str]:
+    """Tokens for lenient_plus: ordinals stripped, then full dates collapsed to one token.
+
+    Only complete dates (day, month and four-digit year, in either order) are rewritten, so
+    "1963" never matches "July 1, 1963" and "July 2017" is left alone.
+    """
+    toks = [_ORDINAL.sub(lambda m: m.group(1), t) for t in _tokens(s)]
+    out, i = [], 0
+    while i < len(toks):
+        if i + 2 < len(toks):
+            a, b, c = toks[i:i + 3]
+            y = _year(c)
+            if y is not None:
+                if a in _MONTHS and _day(b) is not None:
+                    out.append(f"date:{y:04d}-{_MONTHS[a]:02d}-{_day(b):02d}")
+                    i += 3
+                    continue
+                if b in _MONTHS and _day(a) is not None:
+                    out.append(f"date:{y:04d}-{_MONTHS[b]:02d}-{_day(a):02d}")
+                    i += 3
+                    continue
+        out.append(toks[i])
+        i += 1
+    return out
+
+
+def lenient_plus_match(pred: str | None, golds: Iterable[str], slack: int = LENIENT_SLACK) -> bool:
+    """lenient, or the lenient rule on lenient_plus tokens.
+
+    The "or" keeps every lenient match. Collapsing a full date would otherwise hide its year, so
+    "September 14, 1814" would stop matching a gold of "1814", which lenient accepts. It adds no
+    partial date matching of its own: "1963" still fails against "July 1, 1963".
+    """
+    if lenient_match(pred, golds, slack):
+        return True
+    pt = _plus_tokens(pred)
+    if not pt:
+        return False
+    for g in golds:
+        gt = _plus_tokens(g)
+        if gt and len(pt) <= len(gt) + slack and _contains(pt, gt):
+            return True
+    return False
+
+
 def grade_answer(pred: str | None, golds: list[str]) -> dict:
     return {
         "em": exact_match(pred, golds),
         "lenient": lenient_match(pred, golds),
+        "lenient_plus": lenient_plus_match(pred, golds),
         "f1": round(token_f1(pred, golds), 6),
     }
 
@@ -165,7 +233,8 @@ def grade_tier(tier: str, data_dir: Path = DATA, fmt: str = "parquet") -> Path |
 
     n = max(1, len(rows))
     print(f"{tier}: graded {len(rows)} rows -> {out}  "
-          f"em {sum(r['em'] for r in rows) / n:.3f}  lenient {sum(r['lenient'] for r in rows) / n:.3f}"
+          f"em {sum(r['em'] for r in rows) / n:.3f}  lenient {sum(r['lenient'] for r in rows) / n:.3f}  "
+          f"lenient_plus {sum(r['lenient_plus'] for r in rows) / n:.3f}"
           + (f"  ({missing_gold} rows with no gold skipped)" if missing_gold else ""))
     return out
 
