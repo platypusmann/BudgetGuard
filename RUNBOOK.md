@@ -1,130 +1,117 @@
 # Runbook for the real run
 
-Your exact manual steps, in order. The total worst case is about $3.65, a pilot under $0.20 plus a batch run of about $3.45. Tier 0 is free on Kaggle. Nothing here runs by itself, and every paid command prints its worst case and refuses to pass its cap.
+One checklist, in order. Tick each box as you go. Every command runs from `C:\BudgetGuard` in Git Bash, and every one is free unless its heading gives a price. Paid commands print their worst case first and refuse to go past their cap.
 
-Run everything from the repo root. Commands are PowerShell. Always go through `python scripts/bg.py`, which puts `src` on the Python path for you. Calling `python -m budget_guard...` directly fails with ModuleNotFoundError unless you set `$env:PYTHONPATH = "src"` first.
+Total worst case for the whole real run is about $3.65: the pilot ($0.09 actually spent), an optional ambiguity probe (about $0.002) and the batch run (about $3.45). Tier 0 on Kaggle is free.
 
-## 0. One-time setup
+Always go through `python scripts/bg.py`, which puts `src` on the Python path. Calling `python -m budget_guard...` directly fails with ModuleNotFoundError.
 
-1. `pip install -r requirements.txt`
-2. `python scripts/bg.py test` and check that everything passes.
-3. In the OpenAI dashboard, set a hard monthly spend limit of $10 on the project you'll use. That's the backstop behind the per-command caps.
-4. Put the key in your shell session only, never in a file:
-   `$env:OPENAI_API_KEY = "sk-..."`
-   `.env.example` is only a reminder of the variable name. The code doesn't read `.env`.
+## A. Done already (as of 2026-10-19)
 
-## 1. Build the frozen splits (free, needs internet once)
+- [x] `pip install -r requirements.txt`, and the OpenAI project has a $10 hard monthly limit
+- [x] Splits built and frozen: `python scripts/bg.py splits`, then committed (`Freeze AmbigNQ splits`). 17,959 prompts, 2,002 test questions, 300 pilot questions
+- [x] `prompts.jsonl` uploaded to Kaggle as the `budget-guard-prompts` dataset
+- [x] Kaggle Tier 0 pilot run, `tier0.jsonl` saved as `data/cache/tier0.jsonl` (428 rows)
+- [x] Pilot sync for Tier 1 and 2, $0.0917 spent
+- [x] Pilot hand check and pilot signal checks (`python scripts/bg.py pilot-check`)
+- [x] Experiment design frozen (`configs/experiment.sha256`, DECISIONS.md 75)
 
-```
-python scripts/bg.py splits
-```
+## B. Before the full run (free, except the optional probe)
 
-This downloads AmbigNQ light from Hugging Face into `data/raw/` and writes `data/splits/`. Check the printed stats: `n_test` should be 2002, `n_pilot` 300, and `n_prompts` around 17,000 to 18,000. Then commit the splits so they're frozen:
+- [ ] Write your own hand count into DECISIONS.md entry 63 (Tier 0, 1 and 2, out of 30 each). `python scripts/hand_check.py --n 30` prints the rows again.
 
-```
-git add data/splits
-git commit -m "Freeze AmbigNQ splits"
-```
+- [ ] Run the tests. Everything should pass, including the check that the experiment design still matches its lock.
+  ```
+  python scripts/bg.py test
+  ```
 
-Never pass `--force` after this point. `split.verify()` will refuse to tune or evaluate if a split file changes.
+- [ ] Optional, about $0.002: the LLM ambiguity probe on the 300 pilot questions. It has its own prompt and its own cache file (`data/cache/probe_tier1.jsonl`), so nothing frozen changes. Set the key for this terminal only, then:
+  ```
+  read -s -p "Paste key: " OPENAI_API_KEY; echo; export OPENAI_API_KEY
+  python scripts/bg.py cache estimate --task ambiguity --tier tier1 --pilot
+  python scripts/bg.py cache sync --task ambiguity --tier tier1 --pilot --cap 0.01
+  python scripts/bg.py probe-compare
+  ```
+  The estimate should say 300 prompts and about $0.003 worst case. `probe-compare` prints KEEP or DROP (keep only if AUROC is at least 0.72 and the CI's lower end is above 0.65, against the free text detector on the same questions). Write the result into DECISIONS.md either way. A KEEP doesn't change the full run below, because using the probe in the router would be a design change, which needs its own decision first.
 
-## 2. Upload prompts to Kaggle
+## C. Full Tier 0 run on Kaggle (free, a few GPU hours)
 
-1. On Kaggle, Datasets, New Dataset, upload `data/splits/prompts.jsonl` and name it `budget-guard-prompts`. Private is fine.
-2. Create a notebook from `notebooks/kaggle_tier0.py` (paste the cells). Settings: Accelerator GPU T4 x2, Internet on, Persistence Files only. Add `budget-guard-prompts` as an input.
-3. Optional: add a Kaggle secret `HF_TOKEN` and set `HF_MIRROR_REPO` to a private dataset name, so checkpoints survive a crashed session.
+- [ ] In the Kaggle notebook's cell 1, set `PILOT_ONLY = False`. Keep everything else as it is.
+- [ ] Add the pilot version's output as an input to the notebook (Add Input, then your notebook's output), so `restore_prior` merges the 428 pilot rows instead of recomputing them.
+- [ ] Check Session options: Accelerator GPU T4 x2, Internet on.
+- [ ] Save Version, then Save and Run All (Commit). The notebook stops itself cleanly at 11 hours. If it stops before finishing, commit again with the latest output attached, and it carries on from where it stopped.
+- [ ] When the version finishes, open the notebook's page, then the Output tab, download `tier0.jsonl`, and replace your pilot copy:
+  ```
+  mv ~/Downloads/tier0.jsonl data/cache/tier0.jsonl
+  ```
+- [ ] Check it. The tier0 line must say 0 missing, 0 unresolved errors and 0 wrong prompt version. Tier 1 and 2 will still show missing rows at this point, so the overall verdict says NOT COMPLETE. That's expected.
+  ```
+  python scripts/bg.py completeness
+  ```
 
-## 3. Tier 0 pilot on Kaggle (free)
+## D. Batch Tier 1 and Tier 2 (about $3.45 worst case)
 
-1. Leave `PILOT_ONLY = True` in cell 1 and run all cells, using Save Version, then Save and Run All (Commit).
-2. Cell 6 prints sample answers, the share hitting max tokens and mean self consistency. Max-token hits should be a few percent at most.
-3. From the version's Output tab, download `tier0.jsonl` to `data/cache/tier0.jsonl`.
+- [ ] Set the key in this terminal if it isn't set yet:
+  ```
+  read -s -p "Paste key: " OPENAI_API_KEY; echo; export OPENAI_API_KEY
+  ```
+- [ ] Estimate. Expect about 17,500 missing prompts per tier, with a batch worst case of about $0.17 for Tier 1 and $3.3 for Tier 2. If either is far off, stop and ask.
+  ```
+  python scripts/bg.py cache estimate --tier tier1
+  python scripts/bg.py cache estimate --tier tier2
+  ```
+- [ ] Submit both:
+  ```
+  python scripts/bg.py cache batch-submit --tier tier1 --cap 0.5
+  python scripts/bg.py cache batch-submit --tier tier2 --cap 4.0
+  ```
+- [ ] Collect. Batches finish within 24 hours, and you can run this as often as you like. Repeat until both commands say "nothing to collect".
+  ```
+  python scripts/bg.py cache batch-collect --tier tier1
+  python scripts/bg.py cache batch-collect --tier tier2
+  ```
+- [ ] Estimate again. Both tiers should say 0 prompts missing. If not, run the same `batch-submit` line again (only the missing prompts are sent), then collect again.
+- [ ] Check the whole cache. It must end with COMPLETE. If it lists unresolved errors, resubmit as in the previous box. If it lists a wrong prompt version, stop and ask.
+  ```
+  python scripts/bg.py completeness
+  ```
+- [ ] Check the spend: `tail -5 data/cache/ledger.jsonl`. The total so far should be about $1.5 to $3.6.
+- [ ] Commit the cache, so anyone can reproduce every number for $0:
+  ```
+  git add data/cache
+  git commit -m "Real cache: Tier 0, 1 and 2 for every prompt"
+  ```
 
-## 4. Estimate the pilot (free)
+## E. Final evaluation (free, reads test exactly once)
 
-```
-python scripts/bg.py cache estimate --tier tier1 --pilot
-python scripts/bg.py cache estimate --tier tier2 --pilot
-```
+This is the only step that reads the test split. It grades all three tiers, builds the feature table and MiniLM embeddings (now including test), fits on calib, tunes on tune, then evaluates once on test. It refuses to run if the cache isn't complete or the design doesn't match its lock.
 
-Expect about 450 prompts each, with a sync worst case of about $0.01 for Tier 1 and $0.17 for Tier 2. If either is far off, stop and check `prompts.jsonl`.
+- [ ] Run it. It takes about 10 to 20 minutes on the laptop.
+  ```
+  python scripts/bg.py real --minilm
+  ```
+- [ ] Check the header it printed: `experiment design sha256 637c0563... frozen design`, and every tier COMPLETE in the cache completeness lines.
+- [ ] Check `results/run_info.json` says `"data": "REAL"` and `"design_frozen": true`, and that the figures in `results/figures` don't carry the SYNTHETIC stamp.
+- [ ] Read the printed ranking check (lenient against lenient_plus). Any RANKING CHANGES line goes into the write-up.
+- [ ] Pre-registered robustness check on EM, into its own folder:
+  ```
+  python scripts/bg.py evaluate --metric em --embed minilm --out results/em
+  ```
 
-## 5. Pilot sync (about $0.18 worst case)
+## F. Write-up
 
-```
-python scripts/bg.py cache sync --tier tier1 --pilot --cap 0.05
-python scripts/bg.py cache sync --tier tier2 --pilot --cap 0.25
-```
+- [ ] Copy `results/results_table.md` into the README results section and replace the synthetic bullet points with what the real run shows. Lead with the DP against the best simple policy that can use Tier 1 (DECISIONS.md 81), not against the two-model thresholds.
+- [ ] Add a DECISIONS.md entry with the real headline numbers and anything that surprised you. If you changed anything after seeing test numbers, say so there.
+- [ ] Commit:
+  ```
+  git add results README.md DECISIONS.md
+  git commit -m "Real results"
+  ```
 
-If a command dies or some calls fail, rerun the same line. It only calls what's missing and never pays twice. `data/cache/ledger.jsonl` keeps the running spend.
+## If something goes wrong
 
-## 6. Hand check (free)
-
-```
-python scripts/bg.py grade
-python scripts/hand_check.py --n 30
-```
-
-For each tier, look at:
-
-- `models returned` shows the model you expect (gpt-6-luna and gpt-6-sol snapshots, Qwen for Tier 0), and the prompt version is v1.
-- `logprobs missing` is 0 percent for Tier 1 and 2. If it isn't, reasoning effort none wasn't honoured, so stop and fix that before the full run.
-- `hit max tokens` is low. Answers should be short phrases.
-- Read the 30 sampled rows and mark each one right or wrong yourself. Your call should agree with the lenient column on at least 27 of 30. If lenient is clearly too strict or too loose, write down what went wrong in DECISIONS.md before going on. The primary metric is pre-registered, so don't switch it, but the mismatch belongs in the writeup.
-- Rough accuracy on the pilot should land near 20 to 35 percent for Tier 0 and noticeably higher for Tier 2. Big surprises usually mean a prompt or parsing problem.
-
-## 6b. Optional: LLM ambiguity probe on the pilot (about $0.002)
-
-This asks Tier 1 whether each of the 300 pilot questions is ambiguous, with its own prompt and its own cache file (`data/cache/probe_tier1.jsonl`), so nothing frozen changes. Worst case is $0.0034 at sync prices, and a real run should come in near $0.002.
-
-```
-python scripts/bg.py cache estimate --task ambiguity --tier tier1 --pilot
-python scripts/bg.py cache sync --task ambiguity --tier tier1 --pilot --cap 0.01
-python scripts/bg.py probe-compare
-```
-
-The last command scores the probe against the free text detector's out-of-fold scores on the same pilot questions and prints KEEP or DROP. The rule is AUROC at least 0.72 with the lower end of the 95 percent CI above 0.65. If it says DROP, stop there and don't run the probe on more questions.
-
-## 7. Full Tier 0 run on Kaggle (free)
-
-1. Set `PILOT_ONLY = False` and commit the notebook again. To keep the pilot rows, attach the previous version's output as an input, and `restore_prior` merges it.
-2. It's about 17,700 prompts with 5 samples each. If one session isn't enough (the notebook stops itself at 11 hours), commit again with the last output attached and it resumes. You can also split the work with `NUM_SHARDS = 2` and `SHARD_ID = 0` or `1` in two notebooks, then concatenate the two `tier0.jsonl` files.
-3. Download the final `tier0.jsonl` to `data/cache/tier0.jsonl`, replacing the pilot file. It already contains the pilot rows.
-
-## 8. Batch Tier 1 and Tier 2 (about $3.45 worst case)
-
-```
-python scripts/bg.py cache estimate --tier tier1
-python scripts/bg.py cache estimate --tier tier2
-```
-
-Check the batch worst case: about $0.17 for Tier 1 and $3.3 for Tier 2. Pilot prompts are already cached, so they're skipped. Then:
-
-```
-python scripts/bg.py cache batch-submit --tier tier1 --cap 0.5
-python scripts/bg.py cache batch-submit --tier tier2 --cap 4.0
-```
-
-Batches finish within 24 hours. Check on them, as often as you like, with
-
-```
-python scripts/bg.py cache batch-collect --tier tier1
-python scripts/bg.py cache batch-collect --tier tier2
-```
-
-until both say "nothing to collect". Then run `estimate` again. Anything still missing (a failed line or an expired batch) shows up there. Submit again with the same `batch-submit` line, and only the missing prompts are sent.
-
-## 9. Evaluate on the real cache (free, offline)
-
-```
-python scripts/bg.py real
-```
-
-This grades all three tiers, builds the feature table, fits on calib, tunes on tune, and evaluates once on test. It writes `results/` and `results/figures/` and takes a few minutes. For the RouteLLM baseline with MiniLM instead of the hashing embedding, use `python scripts/bg.py real --minilm` (it downloads the model once). Then:
-
-1. Check that `results/run_info.json` says `"data": "REAL"` and that the figures no longer carry the SYNTHETIC stamp.
-2. Copy `results/results_table.md` into the README results section, swap the synthetic bullet points for what the real run shows, and drop the SYNTHETIC wording.
-3. Robustness check on EM: `python scripts/bg.py evaluate --metric em --out results/em`.
-4. Commit `data/cache`, `results/` and the README. Anyone can then reproduce every number for $0.
-
-Test is touched exactly once, in step 9. If you change anything after looking at test numbers, say so in DECISIONS.md.
+- A paid command dies partway or some calls fail: rerun the exact same line. It only sends what's missing, so nothing is paid twice.
+- `ModuleNotFoundError: budget_guard`: you called `python -m ...` directly. Use `python scripts/bg.py ...` instead.
+- `features on real data reads the test split`: you ran `features` by hand. Only step E may do that, through `python scripts/bg.py real`.
+- `refusing to evaluate an incomplete real cache`: run `python scripts/bg.py completeness` and fix what it lists before trying again.
+- `refusing to evaluate real data on anything but the frozen design`: `configs/experiment.yaml` changed after it was frozen. Put it back (`git checkout configs/experiment.yaml`) unless you've decided on a design change and written it up first.
