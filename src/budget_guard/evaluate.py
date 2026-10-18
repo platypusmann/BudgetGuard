@@ -10,6 +10,8 @@ Outputs in --out (default results/):
   summary.csv        one row per config x policy x budget x masked
   paired.csv         per-episode accuracy differences against threshold_fixed and threshold_tuned
   soft_frontier.csv  the fixed-threshold rule swept with no cap, the average-cost frontier
+  metric_ranking.csv headline policy ranking under the primary metric and each secondary one,
+                     same decisions rescored, with every rank change flagged
   schedule.csv       the fitted slack schedule, headline config
   decisions_*.parquet  every decision for a few policies at one budget, headline config
   run_info.json      settings, signal AUROCs, timings, synthetic flag
@@ -60,6 +62,14 @@ def metrics(r: ep.RunResult, env: ep.Env, seeds: np.ndarray, n_boot: int) -> tup
     total = r.total_spend
     K = r.correct.shape[1]
     seed_means = [acc_e[seeds == s].mean() for s in np.unique(seeds)]
+    # the same decisions under every other graded metric, for the ranking check
+    alt = {}
+    for m in env.correct_by:
+        if m == env.metric:
+            continue
+        acc_m = ep.rescore(r, env, m).mean(axis=1)
+        lo_m, hi_m = bootstrap_ci(acc_m, n_boot)
+        alt.update({f"accuracy_{m}": float(acc_m.mean()), f"acc_{m}_ci_lo": lo_m, f"acc_{m}_ci_hi": hi_m})
     return {
         "accuracy": float(acc_e.mean()), "acc_ci_lo": lo, "acc_ci_hi": hi,
         "acc_seed_sd": float(np.std(seed_means)) if len(seed_means) > 1 else float("nan"),
@@ -72,7 +82,36 @@ def metrics(r: ep.RunResult, env: ep.Env, seeds: np.ndarray, n_boot: int) -> tup
         "clarify_rate": float(clar.mean()),
         "clarify_precision": float(amb[clar].mean()) if clar.any() else float("nan"),
         "clarify_recall": float(clar[amb].mean()) if amb.any() else float("nan"),
+        **alt,
     }, acc_e
+
+
+SECONDARY = {"lenient": "lenient_plus", "lenient_plus": "lenient", "em": "lenient"}
+
+
+def ranking_check(summary, primary: str, other: str):
+    """Rank headline policies under both metrics at each budget and flag every change.
+
+    Ranks use accuracy rounded to 4 decimals, ties share the better rank. A swap between two
+    policies whose accuracies are within a CI of each other is noise, so the table keeps both
+    accuracies next to the ranks for the reader to judge.
+    """
+    import pandas as pd
+
+    col = f"accuracy_{other}"
+    h = summary[summary["headline"] & summary["masked"]]
+    if col not in h:
+        return None
+    rows = []
+    for b, g in h.groupby("budget_u2_per_q"):
+        g = g.set_index("policy")
+        r1 = g["accuracy"].round(4).rank(ascending=False, method="min")
+        r2 = g[col].round(4).rank(ascending=False, method="min")
+        for pol in g.index:
+            rows.append({"budget_u2_per_q": b, "policy": pol, f"accuracy_{primary}": g.at[pol, "accuracy"],
+                         f"rank_{primary}": int(r1[pol]), col: g.at[pol, col], f"rank_{other}": int(r2[pol]),
+                         "rank_changed": int(r1[pol]) != int(r2[pol])})
+    return pd.DataFrame(rows)
 
 
 def build_envs(data_dir: Path, eval_split: str, metric: str, embed: str, test_qids):
@@ -173,7 +212,7 @@ def main(argv=None) -> None:
     ap.add_argument("--out", type=Path, default=RESULTS)
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--eval-split", choices=["test", "tune"], default="test")
-    ap.add_argument("--metric", choices=["lenient", "em"], default=None)
+    ap.add_argument("--metric", choices=["lenient", "em", "lenient_plus"], default=None)
     ap.add_argument("--embed", choices=["hash", "minilm", "none"], default="hash")
     ap.add_argument("--no-sweeps", action="store_true", help="headline config only")
     ap.add_argument("--quick", action="store_true", help="tiny settings for tests and smoke runs")
@@ -227,6 +266,24 @@ def main(argv=None) -> None:
             "pool_sizes": {s: e.n for s, e in envs.items()},
             "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
             "fits": extras, "seconds": round(time.time() - t_start, 1)}
+    other = SECONDARY.get(metric)
+    summary = pd.read_csv(args.out / "summary.csv")
+    rank = ranking_check(summary, metric, other) if other else None
+    if rank is None:
+        print(f"ranking check skipped: no {other} grades. Rerun grade.py, then features.py")
+        info["ranking_check"] = "skipped"
+    else:
+        rank.to_csv(args.out / "metric_ranking.csv", index=False)
+        changed = rank[rank["rank_changed"]]
+        print(f"\npolicy ranking, {metric} (primary) against {other} (secondary), same decisions rescored:")
+        if changed.empty:
+            print("  ranking is identical at every headline budget")
+        for b, g in changed.groupby("budget_u2_per_q"):
+            moves = ", ".join(f"{r.policy} {getattr(r, 'rank_' + metric)}->{getattr(r, 'rank_' + other)}"
+                              for r in g.itertuples())
+            print(f"  RANKING CHANGES at budget {b:g} u2: {moves}")
+        info["ranking_check"] = {"secondary": other, "budgets_with_changes": sorted(changed["budget_u2_per_q"].unique().tolist()),
+                                 "n_rank_changes": int(len(changed))}
     (args.out / "run_info.json").write_text(json.dumps(info, indent=2, default=str))
     print(f"wrote {args.out} in {time.time() - t_start:.0f}s")
 

@@ -204,20 +204,32 @@ def make_figures(out: Path) -> list[Path]:
         written.append(p)
 
     write_table(out)
+    for col in s.columns:
+        if col.startswith("accuracy_"):
+            write_table(out, col[len("accuracy_"):])
     print("figures:", ", ".join(str(w) for w in written))
     return written
 
 
-def write_table(out: Path) -> Path:
-    """Markdown table of the headline config at three budgets, for the README."""
+def write_table(out: Path, metric: str | None = None) -> Path:
+    """Markdown table of the headline config at three budgets, for the README.
+
+    metric None is the primary metric. A secondary metric name reads its rescored columns.
+    """
     import pandas as pd
 
     s = pd.read_csv(Path(out) / "summary.csv")
     tag = s["data"].iloc[0]
-    head = s[s["headline"] & s["masked"]]
+    head = s[s["headline"] & s["masked"]].copy()
+    label = head["metric"].iloc[0]
+    if metric is not None:
+        head["accuracy"] = head[f"accuracy_{metric}"]
+        head["acc_ci_lo"] = head[f"acc_{metric}_ci_lo"]
+        head["acc_ci_hi"] = head[f"acc_{metric}_ci_hi"]
+        label = f"{metric}, secondary, same decisions rescored"
     bs = sorted(head["budget_u2_per_q"].unique())
     pick = [bs[0], bs[len(bs) // 2], bs[-1]] if len(bs) >= 3 else bs
-    lines = [f"Accuracy ({head['metric'].iloc[0]}) with bootstrap 95 percent CI, {tag} data, "
+    lines = [f"Accuracy ({label}) with bootstrap 95 percent CI, {tag} data, "
              f"{head['eval_split'].iloc[0]} split, {int(head['n_episodes'].iloc[0])} episodes of "
              f"{int(head['K'].iloc[0])} questions, clarify fee 1x u2, Tier 0 at 0.02/0.08. "
              "Budget is per question in u2, the mean Tier 2 call cost. Violation rate is 0 for every row.", "",
@@ -234,7 +246,7 @@ def write_table(out: Path) -> Path:
             cells.append(f"{r['accuracy']:.3f} ({r['acc_ci_lo']:.3f} to {r['acc_ci_hi']:.3f})")
         lines.append(f"| {LABEL.get(name, name)} | " + " | ".join(cells) + " |")
     assert (head["violation_rate"] == 0).all(), "a masked policy broke the cap"
-    p = Path(out) / "results_table.md"
+    p = Path(out) / ("results_table.md" if metric is None else f"results_table_{metric}.md")
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p
 

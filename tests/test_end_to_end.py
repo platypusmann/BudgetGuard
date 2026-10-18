@@ -46,3 +46,26 @@ def test_hindsight_beats_everyone_and_dp_beats_floor(world, tmp_path):
         acc = g.set_index("policy")["accuracy"]
         assert acc["hindsight_oracle"] >= acc.drop("hindsight_oracle").max() - 1e-12
         assert acc["dp_oracle"] >= acc["always_tier0"] - 0.05
+
+
+def test_both_metrics_reported_and_ranking_checked(world, tmp_path):
+    out = tmp_path / "r3"
+    evaluate.main(["--data-dir", str(world), "--out", str(out), "--quick", "--no-sweeps", "--no-figures"])
+    s = pd.read_csv(out / "summary.csv")
+    assert {"accuracy_lenient_plus", "acc_lenient_plus_ci_lo", "acc_lenient_plus_ci_hi", "accuracy_em"} <= set(s.columns)
+    # lenient_plus keeps every lenient match, so rescoring can only add correct answers
+    assert (s["accuracy_lenient_plus"] >= s["accuracy"] - 1e-12).all()
+    r = pd.read_csv(out / "metric_ranking.csv")
+    assert {"rank_lenient", "rank_lenient_plus", "rank_changed"} <= set(r.columns)
+    info = json.loads((out / "run_info.json").read_text())
+    assert info["ranking_check"]["secondary"] == "lenient_plus"
+
+
+def test_ranking_check_flags_a_swap():
+    rows = []
+    for pol, a1, a2 in [("a", 0.40, 0.40), ("b", 0.35, 0.45), ("c", 0.20, 0.20)]:
+        rows.append({"headline": True, "masked": True, "budget_u2_per_q": 0.35, "policy": pol,
+                     "accuracy": a1, "accuracy_lenient_plus": a2})
+    r = evaluate.ranking_check(pd.DataFrame(rows), "lenient", "lenient_plus").set_index("policy")
+    assert r.loc["a", "rank_changed"] and r.loc["b", "rank_changed"] and not r.loc["c", "rank_changed"]
+    assert r.loc["b", "rank_lenient"] == 2 and r.loc["b", "rank_lenient_plus"] == 1

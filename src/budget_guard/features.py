@@ -5,7 +5,7 @@ One row per pid in prompts.jsonl (raw and clarified prompts). Columns:
   question     is_ambiguous, n_interp, time_sensitive, q_chars, q_words
   per tier k   t{k}_present, t{k}_n_in, t{k}_n_out, t{k}_usd (as charged), t{k}_hit_max,
                t{k}_lp_mean, t{k}_lp_min, t{k}_lp_sum, t{k}_p_first, t{k}_ent,
-               t{k}_em, t{k}_lenient, t{k}_f1
+               t{k}_em, t{k}_lenient, t{k}_lenient_plus, t{k}_f1
   tier 0 only  t0_sc_agree, t0_sc_distinct
   agreement    agree_01, agree_02, agree_12, normalized answers equal across tiers.
                Only observable after both tiers were called, so policies may only read
@@ -34,7 +34,7 @@ MINILM = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def tier_columns(k: int) -> list[str]:
-    base = ["present", "n_in", "n_out", "usd", "hit_max", *LP_KEYS.values(), "em", "lenient", "f1"]
+    base = ["present", "n_in", "n_out", "usd", "hit_max", *LP_KEYS.values(), "em", "lenient", "lenient_plus", "f1"]
     return [f"t{k}_{c}" for c in base]
 
 
@@ -78,9 +78,13 @@ def build_features(data_dir: Path = DATA):
         g = load_graded(tier, data_dir)
         if len(g):
             g = g.set_index("pid")
-            for pid, em, len_, f1, ans in zip(g.index, g["em"], g["lenient"], g["f1"], g["answer_norm"]):
+            # graded files from before lenient_plus existed simply leave that column empty
+            lplus = g["lenient_plus"] if "lenient_plus" in g else [None] * len(g)
+            for pid, em, len_, lp, f1 in zip(g.index, g["em"], g["lenient"], lplus, g["f1"]):
                 if pid in recs:
                     recs[pid].update({f"t{k}_em": bool(em), f"t{k}_lenient": bool(len_), f"t{k}_f1": float(f1)})
+                    if lp is not None:
+                        recs[pid][f"t{k}_lenient_plus"] = bool(lp)
             answers[k] = dict(zip(g.index, g["answer_norm"]))
         unknown = 0
         for pid, rec in recs.items():

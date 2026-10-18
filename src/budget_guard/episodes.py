@@ -35,6 +35,7 @@ FINALS = (T0, T1, T2, C0, C1, C2, SKIP)
 NAMES = ["T0", "T1", "T2", "C0", "C1", "C2", "SKIP", "P0", "P1", "P2"]
 N_TIERS = 3
 MAX_STAGES = 4
+METRICS = ("em", "lenient", "lenient_plus")
 # where a masked action falls to. P_k becomes T_k, which then keeps falling if needed
 LADDER = np.array([SKIP, T0, T1, T0, T1, T2, SKIP, T0, T1, T2])
 
@@ -102,6 +103,18 @@ class Env:
             res.loc[self.is_amb, c] = clar.loc[self.is_amb, c].to_numpy()
         self.orig, self.res = orig.reset_index(), res.reset_index()
 
+        # correctness under every metric that is fully graded for this pool. self.correct is the
+        # primary one, the one policies are fitted and tuned on. The others are only for rescoring
+        self.correct_by: dict[str, np.ndarray] = {}
+        for m in METRICS:
+            cols = [f"t{k}_{m}" for k in range(N_TIERS)]
+            if all(c in self.orig for c in cols) and all(self.orig[c].notna().all() and self.res[c].notna().all()
+                                                         for c in cols):
+                arr = np.zeros((N_TIERS, 2, self.n), bool)
+                for k in range(N_TIERS):
+                    for v, df in enumerate((self.orig, self.res)):
+                        arr[k, v] = df[f"t{k}_{m}"].astype(bool).to_numpy()
+                self.correct_by[m] = arr
         self.correct = np.zeros((N_TIERS, 2, self.n), bool)
         self.cost = np.zeros((N_TIERS, 2, self.n))
         self.wc = np.zeros((N_TIERS, 2, self.n))
@@ -242,6 +255,14 @@ class RunResult:
             "final": np.array(NAMES)[self.final.ravel()], "downgraded": self.downgraded.ravel(),
             "cost": self.spend.ravel(), "correct": self.correct.ravel(),
         })
+
+
+def rescore(r: RunResult, env: Env, metric: str) -> np.ndarray:
+    """Correctness of the same final decisions under another metric. Nothing is rerun or refitted."""
+    a = r.final.astype(int)
+    clar = (a >= C0) & (a <= C2)
+    tier = np.clip(np.where(clar, a - C0, a), 0, N_TIERS - 1)
+    return env.correct_by[metric][tier, clar.astype(int), r.episodes] & (a != SKIP)
 
 
 def true_wc(env: Env, action: np.ndarray, idx: np.ndarray, revealed: np.ndarray, fee: float) -> np.ndarray:
