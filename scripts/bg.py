@@ -12,6 +12,7 @@
   python scripts/bg.py splits         build the frozen AmbigNQ splits (downloads from Hugging Face, once)
   python scripts/bg.py estimate       worst case API cost of everything still missing (spends nothing)
   python scripts/bg.py pilot-check    AUROC of each uncertainty feature and the clarify gain, pilot rows only
+  python scripts/bg.py completeness   check every tier cache has a good v1 row for every prompt (spends nothing)
   python scripts/bg.py ambiguity-text free question-text ambiguity detector, trained on calib, scored on tune
   python scripts/bg.py probe-compare  optional paid probe against the free text detector, pilot questions
   python scripts/bg.py cache ...      any cache_api command, for example
@@ -69,6 +70,8 @@ def main() -> None:
         py("-m", "budget_guard.ambiguity_probe", "compare", *extra)
     elif stage == "ambiguity-text":
         py("-m", "budget_guard.ambiguity_text", *extra)
+    elif stage == "completeness":
+        py("-m", "budget_guard.completeness", *extra)
     elif stage == "pilot-check":
         py("-m", "budget_guard.pilot_check", *extra)
     elif stage == "cache":

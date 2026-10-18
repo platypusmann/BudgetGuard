@@ -74,3 +74,23 @@ def describe(report: dict) -> str:
                      f"{r['prompt_version']} wrong prompt version, {r['retried']} fixed by a retry, "
                      f"{r['unknown']} not in prompts.jsonl")
     return "\n".join(lines)
+
+
+def main(argv=None) -> None:
+    import argparse
+
+    from .common import DATA
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--data-dir", type=Path, default=DATA)
+    args = ap.parse_args(argv)
+    problems, report = check_cache(args.data_dir)
+    print(describe(report))
+    if problems:
+        print("NOT COMPLETE:\n  " + "\n  ".join(problems))
+        raise SystemExit(1)
+    print("COMPLETE: every pid in prompts.jsonl has a good v1 row in every tier cache")
+
+
+if __name__ == "__main__":
+    main()
