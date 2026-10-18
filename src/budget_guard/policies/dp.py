@@ -5,8 +5,9 @@ correct answers over a stream of K questions.
 
 The signal comes in two parts:
   t   a free bin known before paying anything: quantile bin of p_text, the question-text
-      ambiguity detector. The number of bins is picked on tune streams from text_bins_grid
-      (1 bin means the text signal is ignored), so the extra axis is kept only if it helps.
+      ambiguity detector. The number of bins follows the frozen rule in configs/experiment.yaml
+      (design.choose_text_bins): fewest bins unless more bins win by at least min_gain_points
+      on tune streams. 1 bin means the text signal is ignored. Test is never used.
       One bin when that signal is not available.
   s   a bin revealed by the Tier 0 probe: quantile bin of p0 (conf_bins) crossed with
       quantile bin of p_amb (amb_bins)
@@ -47,6 +48,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..episodes import C0, C1, C2, P0, SKIP, T0, T1, T2, Env, Step
+from ..design import choose_text_bins
 from .base import FitContext, Policy
 
 ACTIONS = np.array([T0, T1, T2, C0, C1, C2, SKIP])
@@ -106,17 +108,18 @@ class DPOracle(Policy):
 
     def fit(self, ctx: FitContext) -> None:
         cfg = ctx.cfg["dp"]
-        grid = [int(t) for t in cfg.get("text_bins_grid", [cfg.get("text_bins", 1)])]
+        rule = cfg.get("text_bins", {"grid": [1], "min_gain_points": 0.5})
+        grid = sorted(int(t) for t in rule["grid"])
         if type(self) is not DPOracle or len(grid) == 1 or "p_text" not in ctx.calib.signals:
             self._fit_tables(ctx, grid[0] if type(self) is DPOracle else 1)
             return
-        # pick the number of text bins on tune streams, mean accuracy over the tuning budgets.
-        # Ties go to fewer bins, so the free signal has to earn its extra table cells
+        assert rule.get("select_on", "tune") == "tune" and ctx.tune.split == "tune"
+        # mean accuracy over every tuning budget on the tune streams, then the frozen rule
         self.text_bins_scores = {}
-        for T in sorted(grid):
+        for T in grid:
             self._fit_tables(ctx, T)
             self.text_bins_scores[T] = round(float(np.mean([ctx.tune_score(self, B)[0] for B in ctx.budgets])), 5)
-        best = max(sorted(grid), key=lambda T: self.text_bins_scores[T])
+        best = choose_text_bins(self.text_bins_scores, float(rule["min_gain_points"]))
         self._fit_tables(ctx, best)
 
     def _fit_tables(self, ctx: FitContext, text_bins: int) -> None:

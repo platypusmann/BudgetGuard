@@ -231,7 +231,9 @@ def write_table(out: Path, metric: str | None = None) -> Path:
         label = f"{metric}, secondary, same decisions rescored"
     bs = sorted(head["budget_u2_per_q"].unique())
     pick = [bs[0], bs[len(bs) // 2], bs[-1]] if len(bs) >= 3 else bs
-    lines = [f"Accuracy ({label}) with bootstrap 95 percent CI, {tag} data, "
+    sha = head["design_sha256"].iloc[0] if "design_sha256" in head else "unknown"
+    lines = [f"Experiment design sha256 {sha}.", "",
+             f"Accuracy ({label}) with bootstrap 95 percent CI, {tag} data, "
              f"{head['eval_split'].iloc[0]} split, {int(head['n_episodes'].iloc[0])} episodes of "
              f"{int(head['K'].iloc[0])} questions, clarify fee 1x u2, Tier 0 at 0.02/0.08. "
              "Budget is per question in u2, the mean Tier 2 call cost. Violation rate is 0 for every row.", "",

@@ -1,6 +1,8 @@
 """Final evaluation: sweep budgets, clarify fees and Tier 0 prices, write CSVs and figures.
 
 Order of operations, which is what keeps test clean:
+  0. hash the experiment design and print it in the header. On real data, refuse unless it is the
+     frozen design in configs/experiment.sha256 and no --quick overrides are in play
   1. split.verify() and load the test qids
   2. fit the shared signals on calib (asserts no test qid)
   3. per (fee, price) config: fit and tune every policy on calib and tune only (asserts no test qid)
@@ -32,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import design
 from . import episodes as ep
 from .common import DATA, ROOT
 from .features import load_embeddings, load_features
@@ -252,6 +255,16 @@ def main(argv=None) -> None:
     args = ap.parse_args(argv)
     t_start = time.time()
 
+    synthetic = is_synthetic(args.data_dir)
+    design_sha, frozen = design.check(args.config or design.DESIGN)
+    stamp = design_sha + ("+quick" if args.quick else "") + ("" if frozen else "+unfrozen")
+    print(f"experiment design sha256 {design_sha}: "
+          + ("frozen design" if frozen and not args.quick else
+             "NOT the frozen design" + (" (--quick overrides)" if args.quick else "")))
+    if not synthetic and (args.quick or not frozen):
+        raise SystemExit("refusing to evaluate real data on anything but the frozen design. "
+                         f"configs/experiment.sha256 says {design.locked_hash()}, this run is {stamp}")
+
     test_qids = verify_and_test_qids(args.data_dir / "splits")    # rule 3, first thing
     cfg = ep.load_experiment(args.config)
     if args.quick:
@@ -265,7 +278,6 @@ def main(argv=None) -> None:
     envs, sm, with_routellm = build_envs(args.data_dir, args.eval_split, metric, args.embed, test_qids)
     for s in ("calib", "tune"):
         assert_no_test(envs[s].qids, test_qids, f"{s} pool")
-    synthetic = is_synthetic(args.data_dir)
     print(f"evaluate on {args.eval_split} ({envs[args.eval_split].n} questions), metric {metric}, "
           f"{'SYNTHETIC' if synthetic else 'REAL'} data")
 
@@ -285,6 +297,7 @@ def main(argv=None) -> None:
         soft += so
         extras[f"fee {fee_mult} price {price[0]:g}/{price[1]:g}"] = ex
         if sched is not None:
+            sched.insert(0, "design_sha256", stamp)
             sched.to_csv(args.out / "schedule.csv", index=False)
         print(f"  config done in {time.time() - t:.0f}s")
 
@@ -292,8 +305,9 @@ def main(argv=None) -> None:
     for name, data in (("summary", rows), ("paired", paired), ("soft_frontier", soft)):
         df = pd.DataFrame(data)
         df.insert(0, "data", tag)
+        df.insert(1, "design_sha256", stamp)
         df.to_csv(args.out / f"{name}.csv", index=False)
-    info = {"data": tag, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
+    info = {"data": tag, "design_sha256": stamp, "design_frozen": frozen and not args.quick, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
             "config": cfg, "signal_auc_eval": sm.auc_report(envs[args.eval_split]),
             "pool_sizes": {s: e.n for s, e in envs.items()},
             "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
@@ -305,6 +319,7 @@ def main(argv=None) -> None:
         print(f"ranking check skipped: no {other} grades. Rerun grade.py, then features.py")
         info["ranking_check"] = "skipped"
     else:
+        rank.insert(0, "design_sha256", stamp)
         rank.to_csv(args.out / "metric_ranking.csv", index=False)
         changed = rank[rank["rank_changed"]]
         print(f"\npolicy ranking, {metric} (primary) against {other} (secondary), same decisions rescored:")
@@ -318,6 +333,7 @@ def main(argv=None) -> None:
                                  "n_rank_changes": int(len(changed))}
     pos = clarify_positions(summary)
     if pos is not None:
+        pos.insert(0, "design_sha256", stamp)
         pos.to_csv(args.out / "clarify_reference.csv", index=False)
         mid = sorted(pos["budget_u2_per_q"].unique())[len(pos["budget_u2_per_q"].unique()) // 2]
         m = pos[pos["budget_u2_per_q"] == mid].sort_values("position", ascending=False)

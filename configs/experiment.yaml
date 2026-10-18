@@ -1,28 +1,35 @@
-# Experiment settings for evaluate.py. Not frozen, unlike tiers.yaml and the split salts.
+# FROZEN experiment design, 2026-10-19, fixed before any real cache was evaluated.
+# Its sha256 (over LF-normalized bytes) is in configs/experiment.sha256 and DECISIONS.md, and
+# evaluate.py refuses to run on real data if this file no longer matches it.
+#
 # Budgets and clarify fees are in units of u2, the mean Tier 2 raw-prompt cost on calib
 # at the evaluation price sheet.
 
-K: 100                      # questions per episode
+K: 100                      # questions per episode (stream length)
 episodes_per_seed: 100      # evaluation streams per seed
 seeds: [0, 1, 2]            # evaluation stream seeds
 tune_episodes: 100          # tuning streams on the tune split, seed 1000
-fit_episodes: 60            # DP rollouts per budget on calib for the learned router
+fit_episodes: 60            # DP rollouts per budget on calib for the learned router, seed 2000
 bootstrap: 1000             # bootstrap resamples over episodes
 
-metric: lenient             # pre-registered primary metric, em is the robustness check
+metric: lenient             # pre-registered primary metric. em and lenient_plus are secondary
 batch_prices: false         # standard API prices, a live router cannot wait for batch
 
 budgets: [0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]   # per question, in u2
-clarify_fees: [0.5, 1.0, 2.0]                           # in u2, 1.0 is the default
-tier0_prices: [[0.0, 0.0], [0.02, 0.08], [0.05, 0.20]]  # USD per 1M tokens, [0.02, 0.08] is the default
+clarify_fees: [0.5, 1.0, 2.0]                           # in u2, 1.0 is the headline
+tier0_prices: [[0.0, 0.0], [0.02, 0.08], [0.05, 0.20]]  # USD per 1M tokens in/out, [0.02, 0.08] is the headline
 sweep_budgets: [0.1, 0.35, 0.75]                        # budgets used for the fee and price sweeps
 
 dp:
   grid: 800                 # budget levels
   conf_bins: 8              # quantile bins of calibrated Tier 0 confidence
-  amb_bins: 3               # quantile bins of the ambiguity belief
-  text_bins_grid: [1, 2, 3] # bins of the free question-text ambiguity score, picked on tune. 1 ignores it
-  prior_strength: 5         # pseudo counts toward the action's overall rate in thin bins
+  amb_bins: 3               # quantile bins of the Tier 0 ambiguity belief
+  prior_strength: 5         # pseudo counts toward the pooled rate in thin cells
+  text_bins:                # bins of the free question-text ambiguity score
+    grid: [1, 2, 3]         # 1 means the text score is ignored
+    select_on: tune         # mean DP accuracy over every tuning budget, on the tune streams only
+    min_gain_points: 0.5    # start at the fewest bins, move to more bins only if that beats the
+                            # current choice by at least 0.5 accuracy points. Test is never used
 
 fixed_threshold:            # the ReDAct-style reference, calibrated once on calib
   escalate_rate: 0.2        # share of calib questions sent to Tier 2

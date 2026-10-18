@@ -38,7 +38,9 @@ def test_dp_uses_free_text_bins(fitted, envs):
     dp = _get(fitted, "dp_oracle")
     assert "p_text" in envs["calib"].signals and envs["calib"].signals["p_text"][1] == ()
     assert set(dp.text_bins_scores) == {1, 2, 3}             # picked on tune
-    assert dp.T == max(sorted(dp.text_bins_scores), key=lambda t: dp.text_bins_scores[t])
+    from budget_guard.design import choose_text_bins
+
+    assert dp.T == choose_text_bins(dp.text_bins_scores, 0.5)
     assert dp.pi.shape == (dp.T,) and np.isclose(dp.pi.sum(), 1)
     assert dp.p.shape[0] == dp.T and np.allclose(dp.pi_s.sum(axis=1), 1)
 
