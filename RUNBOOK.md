@@ -73,6 +73,18 @@ For each tier, look at:
 - Read the 30 sampled rows and mark each one right or wrong yourself. Your call should agree with the lenient column on at least 27 of 30. If lenient is clearly too strict or too loose, write down what went wrong in DECISIONS.md before going on. The primary metric is pre-registered, so don't switch it, but the mismatch belongs in the writeup.
 - Rough accuracy on the pilot should land near 20 to 35 percent for Tier 0 and noticeably higher for Tier 2. Big surprises usually mean a prompt or parsing problem.
 
+## 6b. Optional: LLM ambiguity probe on the pilot (about $0.002)
+
+This asks Tier 1 whether each of the 300 pilot questions is ambiguous, with its own prompt and its own cache file (`data/cache/probe_tier1.jsonl`), so nothing frozen changes. Worst case is $0.0034 at sync prices, and a real run should come in near $0.002.
+
+```
+python scripts/bg.py cache estimate --task ambiguity --tier tier1 --pilot
+python scripts/bg.py cache sync --task ambiguity --tier tier1 --pilot --cap 0.01
+python scripts/bg.py probe-compare
+```
+
+The last command scores the probe against the free text detector's out-of-fold scores on the same pilot questions and prints KEEP or DROP. The rule is AUROC at least 0.72 with the lower end of the 95 percent CI above 0.65. If it says DROP, stop there and don't run the probe on more questions.
+
 ## 7. Full Tier 0 run on Kaggle (free)
 
 1. Set `PILOT_ONLY = False` and commit the notebook again. To keep the pilot rows, attach the previous version's output as an input, and `restore_prior` merges it.

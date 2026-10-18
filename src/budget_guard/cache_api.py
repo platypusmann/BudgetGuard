@@ -12,6 +12,11 @@ Examples
   python -m budget_guard.cache_api batch-submit --tier tier2 --splits calib,tune,test
   python -m budget_guard.cache_api batch-collect --tier tier2
 
+Optional extra, --task ambiguity: the paid ambiguity probe from ambiguity_probe.py, Tier 1 and pilot
+only for now. Its own prompt, its own cache (data/cache/probe_<tier>.jsonl) and its own batch log,
+so the answer caches and prompts.py never change.
+  python -m budget_guard.cache_api estimate --task ambiguity --tier tier1 --pilot
+
 Every row lands in data/cache/<tier>.jsonl keyed by pid. Re running any command skips pids that
 already have a good row and pids sitting in an uncollected batch, so nothing is paid for twice.
 """
@@ -55,25 +60,28 @@ def select_prompts(splits: list[str], pilot_only: bool, variants: list[str], lim
             return
 
 
-def cache_path(tier: str) -> Path:
-    return CACHE / f"{tier}.jsonl"
+ANSWER, AMBIGUITY = "answer", "ambiguity"
 
 
-def batch_log(tier: str) -> Path:
-    return BATCH_DIR / f"{tier}_batches.jsonl"
+def cache_path(tier: str, task: str = ANSWER) -> Path:
+    return CACHE / (f"{tier}.jsonl" if task == ANSWER else f"probe_{tier}.jsonl")
 
 
-def batch_states(tier: str) -> dict[str, dict]:
+def batch_log(tier: str, task: str = ANSWER) -> Path:
+    return BATCH_DIR / (f"{tier}_batches.jsonl" if task == ANSWER else f"probe_{tier}_batches.jsonl")
+
+
+def batch_states(tier: str, task: str = ANSWER) -> dict[str, dict]:
     """Append only log, last line per batch id wins."""
     state: dict[str, dict] = {}
-    for rec in iter_jsonl(batch_log(tier)):
+    for rec in iter_jsonl(batch_log(tier, task)):
         state[rec["batch_id"]] = {**state.get(rec["batch_id"], {}), **rec}
     return state
 
 
-def in_flight_pids(tier: str) -> set[str]:
+def in_flight_pids(tier: str, task: str = ANSWER) -> set[str]:
     pids: set[str] = set()
-    for rec in batch_states(tier).values():
+    for rec in batch_states(tier, task).values():
         if rec.get("collected"):
             continue
         for line in iter_jsonl(Path(rec["input_file"])):
@@ -82,8 +90,14 @@ def in_flight_pids(tier: str) -> set[str]:
 
 
 def missing(tier: str, args) -> Iterator[dict]:
-    skip = done_ids(cache_path(tier)) | in_flight_pids(tier)
-    for p in select_prompts(args.splits, args.pilot, args.variants, args.limit):
+    task = getattr(args, "task", ANSWER)
+    skip = done_ids(cache_path(tier, task)) | in_flight_pids(tier, task)
+    variants = args.variants if task == ANSWER else ["orig"]   # the probe reads the raw question only
+    for p in select_prompts(args.splits, args.pilot, variants, args.limit):
+        if task == AMBIGUITY:
+            from .ambiguity_probe import probe_pid
+
+            p = {**p, "pid": probe_pid(p["qid"]), "variant": "ambprobe"}
         if p["pid"] not in skip:
             yield p
 
@@ -102,8 +116,12 @@ def price(cfg: dict, batch: bool) -> tuple[float, float]:
     return cfg["price_in"] * d / 1e6, cfg["price_out"] * d / 1e6
 
 
-def worst_case_cost(cfg: dict, prompts: list[dict], batch: bool) -> float:
+def worst_case_cost(cfg: dict, prompts: list[dict], batch: bool, task: str = ANSWER) -> float:
     pin, pout = price(cfg, batch)
+    if task == AMBIGUITY:
+        from . import ambiguity_probe as probe
+
+        return sum(probe.est_in_tokens(p["text"]) * pin + probe.MAX_OUT * pout for p in prompts)
     return sum(est_in_tokens(p["text"]) * pin + cfg["max_completion_tokens"] * pout for p in prompts)
 
 
@@ -124,6 +142,22 @@ def guard(cost: float, cap: float, force: bool) -> None:
 
 
 # ---------------------------------------------------------------- request and parsing
+
+def task_body(cfg: dict, text: str, task: str) -> dict:
+    if task == AMBIGUITY:
+        from .ambiguity_probe import request_body as probe_body
+
+        return probe_body(cfg, text)
+    return request_body(cfg, text)
+
+
+def task_row(tier: str, cfg: dict, p: dict, body: dict, batch: bool, task: str) -> dict:
+    if task == AMBIGUITY:
+        from .ambiguity_probe import probe_row
+
+        return probe_row(tier, cfg, p, body, batch)
+    return cache_row(tier, cfg, p, body, batch)
+
 
 def request_body(cfg: dict, text: str) -> dict:
     body = {
@@ -203,22 +237,22 @@ def run_sync(tier: str, cfg: dict, args, client) -> None:
     print(f"{tier}: {len(todo)} prompts to run")
     if not todo:
         return
-    guard(worst_case_cost(cfg, todo, batch=False), args.cap, args.over_cap)
+    guard(worst_case_cost(cfg, todo, batch=False, task=args.task), args.cap, args.over_cap)
     if args.dry_run:
         return
 
     spent, ok, failed = 0.0, 0, 0
-    with JsonlAppender(cache_path(tier), sync_every=args.sync_every) as out, \
+    with JsonlAppender(cache_path(tier, args.task), sync_every=args.sync_every) as out, \
             JsonlAppender(LEDGER, sync_every=1) as ledger:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             for start in range(0, len(todo), 200):  # bounded number of futures in memory
                 chunk = todo[start:start + 200]
-                futs = {pool.submit(call_with_retry, client, request_body(cfg, p["text"])): p for p in chunk}
+                futs = {pool.submit(call_with_retry, client, task_body(cfg, p["text"], args.task)): p for p in chunk}
                 chunk_usd = 0.0
                 for fut in as_completed(futs):
                     p = futs[fut]
                     try:
-                        row = cache_row(tier, cfg, p, fut.result(), batch=False)
+                        row = task_row(tier, cfg, p, fut.result(), False, args.task)
                         ok += 1
                     except Exception as e:
                         row = {"pid": p["pid"], "qid": p["qid"], "tier": tier, "ts": now(),
@@ -227,8 +261,8 @@ def run_sync(tier: str, cfg: dict, args, client) -> None:
                     out.write(row)
                     chunk_usd += row.get("usd", 0.0)
                 spent += chunk_usd
-                ledger.write({"ts": now(), "tier": tier, "mode": "sync", "usd": round(chunk_usd, 8),
-                              "n": len(chunk)})
+                ledger.write({"ts": now(), "tier": tier, "task": args.task, "mode": "sync",
+                              "usd": round(chunk_usd, 8), "n": len(chunk)})
                 print(f"  {start + len(chunk)}/{len(todo)} done, ${spent:.4f} spent")
                 if spent > args.cap:
                     print("hit the per command cap, stopping. Re run to continue.")
@@ -243,18 +277,19 @@ def run_batch_submit(tier: str, cfg: dict, args, client) -> None:
     print(f"{tier}: {len(todo)} prompts to submit")
     if not todo:
         return
-    guard(worst_case_cost(cfg, todo, batch=True), args.cap, args.over_cap)
+    guard(worst_case_cost(cfg, todo, batch=True, task=args.task), args.cap, args.over_cap)
     BATCH_DIR.mkdir(parents=True, exist_ok=True)
+    prefix = tier if args.task == ANSWER else f"probe_{tier}"
 
-    with JsonlAppender(batch_log(tier)) as log:
+    with JsonlAppender(batch_log(tier, args.task)) as log:
         for start in range(0, len(todo), MAX_BATCH_LINES):
             chunk = todo[start:start + MAX_BATCH_LINES]
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            path = BATCH_DIR / f"{tier}_{stamp}_{start}.jsonl"
+            path = BATCH_DIR / f"{prefix}_{stamp}_{start}.jsonl"
             with path.open("w", encoding="utf-8", newline="\n") as f:
                 for p in chunk:
                     f.write(json.dumps({"custom_id": p["pid"], "method": "POST", "url": "/v1/chat/completions",
-                                        "body": request_body(cfg, p["text"])}) + "\n")
+                                        "body": task_body(cfg, p["text"], args.task)}) + "\n")
             meta = {p["pid"]: {"qid": p["qid"], "variant": p["variant"], "split": p["split"]} for p in chunk}
             (path.with_suffix(".meta.json")).write_text(json.dumps(meta))
             if args.dry_run:
@@ -264,19 +299,21 @@ def run_batch_submit(tier: str, cfg: dict, args, client) -> None:
                 continue
             up = client.files.create(file=path.open("rb"), purpose="batch")
             b = client.batches.create(input_file_id=up.id, endpoint="/v1/chat/completions",
-                                      completion_window="24h", metadata={"project": "budget-guard", "tier": tier})
+                                      completion_window="24h",
+                                      metadata={"project": "budget-guard", "tier": tier, "task": args.task})
             log.write({"batch_id": b.id, "tier": tier, "input_file": str(path), "n": len(chunk),
                        "submitted": now(), "status": b.status, "collected": False})
             print(f"  submitted {b.id} with {len(chunk)} requests")
 
 
 def run_batch_collect(tier: str, cfg: dict, args, client) -> None:
-    states = batch_states(tier)
+    states = batch_states(tier, args.task)
     open_batches = [s for s in states.values() if not s.get("collected")]
     if not open_batches:
         print(f"{tier}: nothing to collect")
         return
-    with JsonlAppender(batch_log(tier)) as log, JsonlAppender(cache_path(tier), sync_every=args.sync_every) as out, \
+    with JsonlAppender(batch_log(tier, args.task)) as log, \
+            JsonlAppender(cache_path(tier, args.task), sync_every=args.sync_every) as out, \
             JsonlAppender(LEDGER) as ledger:
         for s in open_batches:
             b = client.batches.retrieve(s["batch_id"])
@@ -295,7 +332,7 @@ def run_batch_collect(tier: str, cfg: dict, args, client) -> None:
                     p = {"pid": rec["custom_id"], **meta[rec["custom_id"]]}
                     resp = rec.get("response") or {}
                     if resp.get("status_code") == 200:
-                        row = cache_row(tier, cfg, p, resp["body"], batch=True)
+                        row = task_row(tier, cfg, p, resp["body"], True, args.task)
                         ok += 1
                         usd += row["usd"]
                     else:
@@ -304,7 +341,8 @@ def run_batch_collect(tier: str, cfg: dict, args, client) -> None:
                         err += 1
                     out.write(row)
             # requests in the error file or never run simply stay missing and get resubmitted next time
-            ledger.write({"ts": now(), "tier": tier, "mode": "batch", "batch_id": b.id, "usd": round(usd, 8), "n": ok})
+            ledger.write({"ts": now(), "tier": tier, "task": args.task, "mode": "batch", "batch_id": b.id,
+                          "usd": round(usd, 8), "n": ok})
             log.write({"batch_id": b.id, "status": b.status, "collected": True, "collected_at": now(),
                        "ok": ok, "errors": err, "usd": round(usd, 6)})
             print(f"  merged {ok} rows, {err} errors, ${usd:.4f}")
@@ -331,7 +369,11 @@ def main(argv=None, client=None) -> None:
     ap.add_argument("--cap", type=float, default=None, help="USD cap for this command")
     ap.add_argument("--over-cap", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--task", choices=[ANSWER, AMBIGUITY], default=ANSWER,
+                    help="answer (default) or the optional ambiguity probe, Tier 1 and pilot only")
     args = ap.parse_args(argv)
+    if args.task == AMBIGUITY and (args.tier != "tier1" or not args.pilot):
+        sys.exit("the ambiguity probe is Tier 1 and pilot only for now: pass --tier tier1 --pilot")
 
     tiers = load_yaml(CONFIGS / "tiers.yaml")
     cfg = tiers[args.tier]
@@ -339,9 +381,10 @@ def main(argv=None, client=None) -> None:
 
     if args.command == "estimate":
         todo = list(missing(args.tier, args))
-        print(f"{args.tier}: {len(todo)} prompts missing")
-        print(f"  sync  worst case ${worst_case_cost(cfg, todo, False):.4f}")
-        print(f"  batch worst case ${worst_case_cost(cfg, todo, True):.4f}")
+        label = args.tier if args.task == ANSWER else f"{args.tier} ambiguity probe"
+        print(f"{label}: {len(todo)} prompts missing")
+        print(f"  sync  worst case ${worst_case_cost(cfg, todo, False, args.task):.4f}")
+        print(f"  batch worst case ${worst_case_cost(cfg, todo, True, args.task):.4f}")
         print(f"  recorded spend so far ${spent_so_far():.4f}")
         return
 
