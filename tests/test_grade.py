@@ -95,3 +95,71 @@ def test_grade_cli_jsonl(world, tmp_path):
     grade.main(["--data-dir", str(tmp_path), "--tier", "tier0", "--format", "jsonl"])
     rows = list(iter_jsonl(tmp_path / "graded" / "tier0.jsonl"))
     assert rows and "lenient" in rows[0]
+
+
+# ---------------------------------------------------------------- lenient_plus
+
+from budget_guard.grade import lenient_plus_match  # noqa: E402
+
+
+@pytest.mark.parametrize("pred, gold", [
+    ("78th", "78"),
+    ("78", "78th"),
+    ("78th in the world", "78"),
+    ("the 1st", "1"),
+    ("2nd", "2"),
+    ("3rd place", "3"),
+    ("21st century", "21st century"),
+])
+def test_lenient_plus_strips_ordinals(pred, gold):
+    assert lenient_plus_match(pred, [gold])
+
+
+@pytest.mark.parametrize("pred", [
+    "1 July 2017", "July 1 2017", "July 1, 2017", "1st July 2017", "July 1st, 2017", "1 Jul 2017",
+    "the 1st July 2017", "It was July 1, 2017",
+])
+def test_lenient_plus_canonicalizes_date_order(pred):
+    assert lenient_plus_match(pred, ["July 1, 2017"])
+    assert lenient_plus_match(pred, ["1 July 2017"])
+
+
+def test_lenient_plus_fixes_the_pilot_misses_lenient_had():
+    assert not lenient_match("1 July 2017", ["July 1, 2017"])
+    assert lenient_plus_match("1 July 2017", ["July 1, 2017"])
+    assert not lenient_match("78th", ["78"])
+    assert lenient_plus_match("78th", ["78"])
+
+
+def test_lenient_plus_does_not_match_partial_dates():
+    assert not lenient_plus_match("1963", ["July 1 1963"])
+    assert not lenient_plus_match("1963", ["July 1, 1963"])
+    assert not lenient_plus_match("July 1963", ["July 1, 1963"])
+    assert not lenient_plus_match("July 1", ["July 1, 1963"])
+    assert not lenient_plus_match("2 July 2017", ["July 1, 2017"])          # different day
+    assert not lenient_plus_match("July 1, 2016", ["July 1, 2017"])        # different year
+
+
+def test_lenient_plus_has_no_synonyms():
+    assert not lenient_plus_match("plasma membrane", ["cell membrane"])
+    assert not lenient_plus_match("Plasma membrane", ["cell membrane"])
+
+
+def test_lenient_plus_keeps_every_lenient_match():
+    # collapsing a full date would hide its year, so the lenient match must survive
+    assert lenient_match("September 14, 1814", ["1814"])
+    assert lenient_plus_match("September 14, 1814", ["1814"])
+    for pred, gold in [("The Eiffel Tower in Paris", ["Eiffel Tower"]), ("It was 1969", ["1969"])]:
+        assert lenient_plus_match(pred, gold)
+
+
+def test_lenient_plus_keeps_the_length_cap():
+    assert lenient_plus_match("78th x y z w", ["78"])                        # 5 tokens, at the cap of 1 + 4
+    assert not lenient_plus_match("78th x y z w v", ["78"])                 # 6 tokens, over it
+    assert not lenient_plus_match("", ["78"])
+    assert not lenient_plus_match("the", ["78"])
+
+
+def test_grade_answer_has_lenient_plus():
+    g = grade_answer("1 July 2017", ["July 1, 2017"])
+    assert g["lenient_plus"] and not g["lenient"] and not g["em"]
