@@ -12,6 +12,8 @@ Outputs in --out (default results/):
   soft_frontier.csv  the fixed-threshold rule swept with no cap, the average-cost frontier
   metric_ranking.csv headline policy ranking under the primary metric and each secondary one,
                      same decisions rescored, with every rank change flagged
+  clarify_reference.csv  where each policy lands between blind clarify-all (0) and the ambiguity
+                     oracle (1) at each headline budget, with clarify precision and recall
   schedule.csv       the fitted slack schedule, headline config
   decisions_*.parquet  every decision for a few policies at one budget, headline config
   run_info.json      settings, signal AUROCs, timings, synthetic flag
@@ -114,6 +116,34 @@ def ranking_check(summary, primary: str, other: str):
     return pd.DataFrame(rows)
 
 
+def clarify_positions(summary):
+    """Place every policy between the two clarify references at each headline budget.
+
+    position = (acc - acc clarify_all) / (acc ambiguity_oracle - acc clarify_all), so blind
+    clarify-all is 0 and clarify-exactly-when-ambiguous is 1. Values outside [0, 1] are possible
+    and meaningful: under a tight budget clarifying everything can be worse than never clarifying,
+    and a policy that also routes tiers better than the oracle's DP can pass 1. Undefined (nan)
+    where the two references are within half a point of each other.
+    """
+    import pandas as pd
+
+    h = summary[summary["headline"] & summary["masked"]]
+    rows = []
+    for b, g in h.groupby("budget_u2_per_q"):
+        g = g.set_index("policy")
+        if not {"clarify_all", "ambiguity_oracle"} <= set(g.index):
+            return None
+        lo, hi = g.at["clarify_all", "accuracy"], g.at["ambiguity_oracle", "accuracy"]
+        span = hi - lo
+        for pol, r in g.iterrows():
+            rows.append({"budget_u2_per_q": b, "policy": pol, "accuracy": r["accuracy"],
+                         "acc_clarify_all": lo, "acc_ambiguity_oracle": hi,
+                         "position": (r["accuracy"] - lo) / span if abs(span) >= 0.005 else float("nan"),
+                         "clarify_rate": r["clarify_rate"], "clarify_precision": r["clarify_precision"],
+                         "clarify_recall": r["clarify_recall"]})
+    return pd.DataFrame(rows)
+
+
 def build_envs(data_dir: Path, eval_split: str, metric: str, embed: str, test_qids):
     feats = load_features(data_dir)
     emb = None
@@ -198,7 +228,9 @@ def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids,
             m, _ = metrics(r, ev, seeds, n_boot)
             soft_rows.append({**base, "policy": "soft_frontier", "escalate_rate_calib": rate, **m})
         schedule = ctx.fitted["slack_schedule"].table()
-    extras = {"router_model": getattr(ctx.fitted.get("learned_router"), "model_name", None),
+    extras = {"dp_text_bins": getattr(ctx.fitted.get("dp_oracle"), "T", None),
+              "dp_text_bins_tune_scores": getattr(ctx.fitted.get("dp_oracle"), "text_bins_scores", None),
+              "router_model": getattr(ctx.fitted.get("learned_router"), "model_name", None),
               "router_scores": getattr(ctx.fitted.get("learned_router"), "scores", None),
               "schedule_agreement": getattr(ctx.fitted.get("slack_schedule"), "agreement", None)}
     return rows, paired_rows, soft_rows, schedule, extras
@@ -284,6 +316,18 @@ def main(argv=None) -> None:
             print(f"  RANKING CHANGES at budget {b:g} u2: {moves}")
         info["ranking_check"] = {"secondary": other, "budgets_with_changes": sorted(changed["budget_u2_per_q"].unique().tolist()),
                                  "n_rank_changes": int(len(changed))}
+    pos = clarify_positions(summary)
+    if pos is not None:
+        pos.to_csv(args.out / "clarify_reference.csv", index=False)
+        mid = sorted(pos["budget_u2_per_q"].unique())[len(pos["budget_u2_per_q"].unique()) // 2]
+        m = pos[pos["budget_u2_per_q"] == mid].sort_values("position", ascending=False)
+        r0 = m.iloc[0]
+        print(f"\nclarify references at {mid:g} u2: clarify-all {r0.acc_clarify_all:.3f}, "
+              f"ambiguity oracle {r0.acc_ambiguity_oracle:.3f}. Position 0 is clarify-all, 1 the oracle")
+        for r in m.itertuples():
+            print(f"  {r.policy:18s} acc {r.accuracy:.3f}  position {r.position:+.2f}  clarify {r.clarify_rate:.0%}  "
+                  f"precision {r.clarify_precision:.2f}  recall {r.clarify_recall:.2f}")
+        info["clarify_reference"] = {p: round(float(v), 3) for p, v in zip(m["policy"], m["position"])}
     (args.out / "run_info.json").write_text(json.dumps(info, indent=2, default=str))
     print(f"wrote {args.out} in {time.time() - t_start:.0f}s")
 

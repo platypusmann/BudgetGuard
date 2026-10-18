@@ -21,6 +21,7 @@ dp:
   grid: 800                 # budget levels
   conf_bins: 8              # quantile bins of calibrated Tier 0 confidence
   amb_bins: 3               # quantile bins of the ambiguity belief
+  text_bins_grid: [1, 2, 3] # bins of the free question-text ambiguity score, picked on tune. 1 ignores it
   prior_strength: 5         # pseudo counts toward the action's overall rate in thin bins
 
 fixed_threshold:            # the ReDAct-style reference, calibrated once on calib

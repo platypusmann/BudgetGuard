@@ -6,7 +6,8 @@ import pandas as pd
 from budget_guard import evaluate
 
 POLICIES = {"always_tier0", "always_tier1", "always_tier2", "random_matched", "cascade_frugal", "threshold_fixed",
-            "threshold_tuned", "slack_schedule", "dp_oracle", "learned_router", "routellm", "hindsight_oracle"}
+            "threshold_tuned", "slack_schedule", "dp_oracle", "learned_router", "routellm", "hindsight_oracle",
+            "clarify_all", "ambiguity_oracle"}
 
 
 def test_pipeline_produces_headline_figure(world, tmp_path):
@@ -34,6 +35,9 @@ def test_pipeline_produces_headline_figure(world, tmp_path):
     info = json.loads((out / "run_info.json").read_text())
     assert info["data"] == "SYNTHETIC"
     assert any(out.glob("decisions_*.parquet"))
+    pos = pd.read_csv(out / "clarify_reference.csv")
+    ref = pos[pos["policy"].isin(["clarify_all", "ambiguity_oracle"])]
+    assert set(ref.dropna(subset=["position"]).groupby("policy")["position"].first().round(6)) <= {0.0, 1.0}
 
 
 def test_hindsight_beats_everyone_and_dp_beats_floor(world, tmp_path):

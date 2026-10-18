@@ -96,6 +96,8 @@ class Env:
         self.qids = orig.index.to_numpy()
         self.n = len(self.qids)
         self.is_amb = orig["is_ambiguous"].to_numpy(bool)
+        # raw question text, for the free text ambiguity detector. Older feature tables lack it
+        self.questions = orig["question"].tolist() if "question" in orig else None
         self.time_sensitive = orig["time_sensitive"].to_numpy(bool)
         res = orig.copy()
         clar = clar.reindex(self.qids)

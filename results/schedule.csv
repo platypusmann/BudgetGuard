@@ -1,9 +1,9 @@
 slack_from_u2,first_move,clarify_when,tier2_when,tier1_when,after_clarify_tier2_when,after_clarify_tier1_when,dp_decisions
-0.0,P0,never,never,never,never,never,9761
-0.03,T1,never,never,u > 0.648,never,never,4321
-0.06,P0,never,never,always,never,always,5810
-0.1,P0,never,never,always,u > 0.726,always,8827
-0.2,P0,never,never,always,u < 0.884,always,9991
-0.35,P0,p_amb > 0.675,never,always,u < 0.877,always,13611
-0.6,P0,p_amb > 0.684,never,always,u < 0.882,always,14535
-1.0,P0,p_amb > 0.358,never,always,u < 0.916,always,7360
+0.0,P0,never,never,never,never,never,9205
+0.03,P0,never,never,u > 0.540,never,never,9258
+0.06,P0,never,never,always,never,always,3991
+0.1,P0,never,never,always,u < 0.702,u > 0.655,10702
+0.2,P0,never,never,always,never,u > 0.636,9801
+0.35,P0,never,u < 0.541,always,u > 0.837,u > 0.657,14027
+0.6,P0,p_amb > 0.682,u < 0.541,always,u > 0.636,u > 0.636,14782
+1.0,P0,p_amb > 0.405,u < 0.891,always,always,u > 0.578,7311

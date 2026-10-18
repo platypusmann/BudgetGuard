@@ -4,6 +4,9 @@
   p_amb  P(question is ambiguous | Tier 0 features, question features), needs Tier 0
   p1     P(Tier 1 raw answer is correct | Tier 1 features, agreement with Tier 0), needs Tiers 0 and 1
   x0     standardized Tier 0 feature matrix, for the learned router, needs Tier 0
+  p_text P(question is ambiguous | question text), the free detector from ambiguity_text.py,
+         needs nothing, so a policy can use it before paying for any call. Hand features plus the
+         env's question embedding when there is one, hand features alone otherwise
 
 On calib itself the values are out of fold (5 folds), so tables estimated on calib, like the DP's
 success rates per bin, are not optimistic. Other splits get the model fitted on all of calib.
@@ -57,6 +60,13 @@ class SignalModel:
             self.models[name] = self._clf().fit(X, y)
         self.scaler0 = StandardScaler().fit(X0)
         self.calib_qids = calib.qids
+        self.text = None
+        if calib.questions is not None:
+            from .ambiguity_text import TextAmbiguityDetector
+
+            self.text = TextAmbiguityDetector("combined" if calib.emb is not None else "hand")
+            self.oof["p_text"] = self.text.out_of_fold(calib.questions, calib.emb, calib.is_amb)
+            self.text.fit(calib.questions, calib.emb, calib.is_amb)
         return self
 
     def apply(self, env: Env) -> Env:
@@ -67,13 +77,19 @@ class SignalModel:
             vals = self.oof[name] if in_sample else self.models[name].predict_proba(X)[:, 1]
             env.add_signal(name, vals, needs)
         env.add_signal("x0", self.scaler0.transform(X0).astype("float32"), (0,))
+        if self.text is not None and env.questions is not None:
+            vals = self.oof["p_text"] if in_sample else self.text.predict(env.questions, env.emb)
+            env.add_signal("p_text", vals, ())
         return env
 
     def auc_report(self, env: Env) -> dict:
         from sklearn.metrics import roc_auc_score
 
         out = {}
-        for name, y in (("p0", env.correct[0, 0]), ("p_amb", env.is_amb), ("p1", env.correct[1, 0])):
+        pairs = [("p0", env.correct[0, 0]), ("p_amb", env.is_amb), ("p1", env.correct[1, 0])]
+        if "p_text" in env.signals:
+            pairs.append(("p_text", env.is_amb))
+        for name, y in pairs:
             if len(set(y)) == 2:
                 out[name] = round(float(roc_auc_score(y, env.signals[name][0])), 3)
         return out

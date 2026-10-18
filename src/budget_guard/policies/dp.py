@@ -3,30 +3,44 @@
 The SIT320 toy's oracle, moved from a product reward over the steps of one task to a sum of
 correct answers over a stream of K questions.
 
+The signal comes in two parts:
+  t   a free bin known before paying anything: quantile bin of p_text, the question-text
+      ambiguity detector. The number of bins is picked on tune streams from text_bins_grid
+      (1 bin means the text signal is ignored), so the extra axis is kept only if it helps.
+      One bin when that signal is not available.
+  s   a bin revealed by the Tier 0 probe: quantile bin of p0 (conf_bins) crossed with
+      quantile bin of p_amb (amb_bins)
+
 Model, all estimated on calib with out-of-fold signals:
-  signal bin s    quantile bin of p0 (conf_bins) crossed with quantile bin of p_amb (amb_bins)
-  pi[s]           share of questions in bin s
-  p[s, a]         P(correct | s, a) for a in T0 T1 T2 C0 C1 C2, shrunk toward the action's overall
-                  rate with prior_strength pseudo counts so thin bins stay sane
-  c[s, a]         mean extra cost of a after the Tier 0 probe, fee included
-  w[a]            mean worst-case extra cost of a, used for feasibility while planning
-  c_probe, w_probe  mean actual and worst-case cost of the Tier 0 probe
-  pd[a], cd[a], wd[a]  success rate, mean cost and mean worst case of answering directly with no
-                  probe, for when the probe itself is not worth its price
+  pi[t], pi_s[t, s]   share of questions in t, and in s given t
+  p[t, s, a]          P(correct | t, s, a) for a in T0 T1 T2 C0 C1 C2. Shrunk with prior_strength
+                      pseudo counts toward the pooled p_s[s, a], which is shrunk toward the action's
+                      overall rate, so thin cells stay sane
+  c[t, s, a]          mean extra cost of a after the probe, fee included, shrunk the same way
+  w[a]                mean worst-case extra cost of a, used for feasibility while planning
+  c_probe, w_probe    mean actual and worst-case cost of the Tier 0 probe
+  pd, cd [t, a], wd[a]  answering directly with no probe, for when the probe is not worth it
+  allowed[t, a]       which final actions a subclass may take in text bin t. All, for the DP itself
 
 Recurrence, with b continuous and V linearly interpolated on a grid of `grid` levels over [0, B]:
   V(0, b) = 0
-  Vp(n, b) = sum_s pi[s] max over a with w[a] <= b - c_probe of p[s, a] + V(n - 1, b - c_probe - c[s, a])
-  Vd(n, b) = max over a with wd[a] <= b of pd[a] + V(n - 1, b - cd[a])
-  V(n, b) = max(V(n - 1, b), Vd(n, b), Vp(n, b) if w_probe <= b)
+  Vp(n, b, t) = sum_s pi_s[t, s] max over allowed a with w[a] <= b - c_probe of
+                p[t, s, a] + V(n - 1, b - c_probe - c[t, s, a])
+  Vd(n, b, t) = max over allowed a with wd[a] <= b of pd[t, a] + V(n - 1, b - cd[t, a])
+  V(n, b) = sum_t pi[t] max(V(n - 1, b), Vd(n, b, t), Vp(n, b, t) if w_probe <= b)
 The first option is skipping the question. Every option that is feasible at b stays feasible at a
 larger b, which is what the monotonicity lemma needs: V(n, b) is non-decreasing in b for every n.
 tests/test_dp_monotone.py checks this on the real table.
 
-At run time stage 0 compares skip, probe and every direct answer with the same formulas, using
-each question's exact worst case (as policies see it) for feasibility. After a probe it picks the
-action with the best p[s, a] + V(n - 1, left - c[s, a]) among feasible actions. The runner's mask
-still applies on top.
+At run time stage 0 compares skip, probe and every allowed direct answer for the question's text
+bin, using its exact worst case (as policies see it) for feasibility. After a probe it picks the
+allowed action with the best p[t, s, a] + V(n - 1, left - c[t, s, a]). The runner's mask applies
+on top.
+
+Two reference policies reuse this machinery and change only the clarify rule:
+  AmbiguityOracleDP  text axis is the true is_ambiguous label, clarify actions only on ambiguous
+                     questions and plain answers only on clear ones
+  ClarifyAllDP       no text axis, clarify actions only, on every question
 """
 from __future__ import annotations
 
@@ -36,6 +50,8 @@ from ..episodes import C0, C1, C2, P0, SKIP, T0, T1, T2, Env, Step
 from .base import FitContext, Policy
 
 ACTIONS = np.array([T0, T1, T2, C0, C1, C2, SKIP])
+DIRECT = ACTIONS[:6]
+IS_CLARIFY = np.array([False, False, False, True, True, True, False])
 
 
 def _interp(V: np.ndarray, x: np.ndarray, delta: float) -> np.ndarray:
@@ -48,11 +64,62 @@ def _interp(V: np.ndarray, x: np.ndarray, delta: float) -> np.ndarray:
     return V[lo] * (1 - w) + V[hi] * w
 
 
+def _interp_col(M: np.ndarray, x: np.ndarray, t: np.ndarray, delta: float) -> np.ndarray:
+    """Column t[i] of M (G+1, T) at budget x[i], for each episode i."""
+    G = M.shape[0] - 1
+    pos = np.clip(x / delta, 0, G) if delta > 0 else np.zeros_like(x)
+    lo = np.floor(pos).astype(int)
+    hi = np.minimum(lo + 1, G)
+    w = pos - lo
+    return M[lo, t] * (1 - w) + M[hi, t] * w
+
+
+def _shrink(total: np.ndarray, n: np.ndarray, prior: np.ndarray, m: float) -> np.ndarray:
+    return (total + m * prior) / (n + m)
+
+
 class DPOracle(Policy):
     name, label = "dp_oracle", "DP oracle (budget-aware)"
     budget_aware = True
 
+    # ---- hooks the reference policies override
+
+    def _text_calib(self, env: Env, T: int) -> tuple[np.ndarray, int]:
+        """Text bin of every calib question, and the number of bins."""
+        if T <= 1 or "p_text" not in env.signals:
+            self.text_edges = np.array([])
+            return np.zeros(env.n, int), 1
+        pt = env.signals["p_text"][0]
+        self.text_edges = np.quantile(pt, np.linspace(0, 1, T + 1)[1:-1])
+        return np.searchsorted(self.text_edges, pt, side="right"), T
+
+    def _text_step(self, step: Step) -> np.ndarray:
+        if not len(self.text_edges):
+            return np.zeros(len(step.idx), int)
+        return np.searchsorted(self.text_edges, np.nan_to_num(step.sig("p_text"), nan=0.0), side="right")
+
+    def _allowed(self, T: int) -> np.ndarray:
+        """allowed[t, j] over ACTIONS. SKIP must stay allowed."""
+        return np.ones((T, len(ACTIONS)), bool)
+
+    # ---- fitting
+
     def fit(self, ctx: FitContext) -> None:
+        cfg = ctx.cfg["dp"]
+        grid = [int(t) for t in cfg.get("text_bins_grid", [cfg.get("text_bins", 1)])]
+        if type(self) is not DPOracle or len(grid) == 1 or "p_text" not in ctx.calib.signals:
+            self._fit_tables(ctx, grid[0] if type(self) is DPOracle else 1)
+            return
+        # pick the number of text bins on tune streams, mean accuracy over the tuning budgets.
+        # Ties go to fewer bins, so the free signal has to earn its extra table cells
+        self.text_bins_scores = {}
+        for T in sorted(grid):
+            self._fit_tables(ctx, T)
+            self.text_bins_scores[T] = round(float(np.mean([ctx.tune_score(self, B)[0] for B in ctx.budgets])), 5)
+        best = max(sorted(grid), key=lambda T: self.text_bins_scores[T])
+        self._fit_tables(ctx, best)
+
+    def _fit_tables(self, ctx: FitContext, text_bins: int) -> None:
         cfg = ctx.cfg["dp"]
         env, fee = ctx.calib, ctx.fee
         self.K, self.G, self.fee = ctx.K, int(cfg["grid"]), fee
@@ -63,6 +130,10 @@ class DPOracle(Policy):
         self.na = na
         s = self.bins(p0, pa)
         S = nc * na
+        t, T = self._text_calib(env, text_bins)
+        self.T = T
+        self.allowed = self._allowed(T)
+        assert self.allowed[:, -1].all(), "SKIP must stay allowed"
         amb = env.is_amb
         # outcome and cost of every final action for every calib question, after the probe
         correct = np.stack([env.correct[0, 0], env.correct[1, 0], env.correct[2, 0],
@@ -76,16 +147,24 @@ class DPOracle(Policy):
         wc = np.stack([np.zeros(env.n), env.wc[1, 0], env.wc[2, 0], fee + env.wc[0, 0],
                        fee + env.wc[1, 0], fee + env.wc[2, 0], np.zeros(env.n)], axis=1)
         m = float(cfg["prior_strength"])
+        A = len(ACTIONS)
         overall_p, overall_c = correct.mean(axis=0), cost.mean(axis=0)
-        self.pi = np.zeros(S)
-        self.p = np.zeros((S, len(ACTIONS)))
-        self.c = np.zeros((S, len(ACTIONS)))
+        # pooled over the text axis first, then each text bin shrinks toward the pooled table
+        p_s, c_s = np.zeros((S, A)), np.zeros((S, A))
         for b in range(S):
             sel = s == b
-            n = sel.sum()
-            self.pi[b] = n / env.n
-            self.p[b] = (correct[sel].sum(axis=0) + m * overall_p) / (n + m)
-            self.c[b] = (cost[sel].sum(axis=0) + m * overall_c) / (n + m)
+            p_s[b] = _shrink(correct[sel].sum(axis=0), sel.sum(), overall_p, m)
+            c_s[b] = _shrink(cost[sel].sum(axis=0), sel.sum(), overall_c, m)
+        self.pi = np.array([(t == i).mean() for i in range(T)])
+        self.pi_s = np.zeros((T, S))
+        self.p, self.c = np.zeros((T, S, A)), np.zeros((T, S, A))
+        for i in range(T):
+            in_t = t == i
+            for b in range(S):
+                sel = in_t & (s == b)
+                self.pi_s[i, b] = sel.sum() / max(in_t.sum(), 1)
+                self.p[i, b] = _shrink(correct[sel].sum(axis=0), sel.sum(), p_s[b], m)
+                self.c[i, b] = _shrink(cost[sel].sum(axis=0), sel.sum(), c_s[b], m)
         self.w = wc.mean(axis=0)
         self.c_probe, self.w_probe = float(env.cost[0, 0].mean()), float(env.wc[0, 0].mean())
         # answering with no probe: nothing is revealed, so a clarify always pays for its call
@@ -93,7 +172,12 @@ class DPOracle(Policy):
                                 fee + env.cost[1, 1], fee + env.cost[2, 1]], axis=1)
         direct_wc = np.stack([env.wc[0, 0], env.wc[1, 0], env.wc[2, 0], fee + env.wc[0, 0],
                               fee + env.wc[1, 0], fee + env.wc[2, 0]], axis=1)
-        self.pd, self.cd, self.wd = correct[:, :6].mean(axis=0), direct_cost.mean(axis=0), direct_wc.mean(axis=0)
+        self.pd, self.cd = np.zeros((T, 6)), np.zeros((T, 6))
+        for i in range(T):
+            sel = t == i
+            self.pd[i] = _shrink(correct[sel, :6].sum(axis=0), sel.sum(), overall_p[:6], m)
+            self.cd[i] = _shrink(direct_cost[sel].sum(axis=0), sel.sum(), direct_cost.mean(axis=0), m)
+        self.wd = direct_wc.mean(axis=0)
         self.tables: dict[float, tuple[np.ndarray, np.ndarray]] = {}
         for B in ctx.budgets:
             self.solve(B)
@@ -104,33 +188,36 @@ class DPOracle(Policy):
         return cb * self.na + ab
 
     def solve(self, B: float) -> tuple[np.ndarray, np.ndarray]:
-        """Fill V (K+1, G+1) and Vp (K+1, G+1) for total budget B. Cached per B."""
+        """Fill V (K+1, G+1) and Vp (K+1, G+1, T) for total budget B. Cached per B."""
         key = round(float(B), 15)
         if key in self.tables:
             return self.tables[key]
-        G, K = self.G, self.K
+        G, K, T = self.G, self.K, self.T
         delta = B / G
         b = np.arange(G + 1) * delta
         V = np.zeros((K + 1, G + 1))
-        Vp = np.full((K + 1, G + 1), -1e9)
+        Vp = np.full((K + 1, G + 1, T), -1e9)
         b1 = b - self.c_probe
         probe_ok = self.w_probe <= b + 1e-15
-        rem = b1[:, None, None] - self.c[None, :, :]                       # (G+1, S, A)
-        feas = (self.w[None, None, :] <= b1[:, None, None] + 1e-15) & (rem >= -1e-15)
+        rem = b1[:, None, None, None] - self.c[None]                                 # (G+1, T, S, A)
+        feas = ((self.w[None, None, None, :] <= b1[:, None, None, None] + 1e-15) & (rem >= -1e-15)
+                & self.allowed[None, :, None, :])
         rem = np.maximum(rem, 0.0)
-        rem_d = b[:, None] - self.cd[None, :]                              # (G+1, 6)
-        feas_d = (self.wd[None, :] <= b[:, None] + 1e-15) & (rem_d >= -1e-15)
+        rem_d = b[:, None, None] - self.cd[None]                                     # (G+1, T, 6)
+        feas_d = ((self.wd[None, None, :] <= b[:, None, None] + 1e-15) & (rem_d >= -1e-15)
+                  & self.allowed[None, :, :6])
         rem_d = np.maximum(rem_d, 0.0)
         for n in range(1, K + 1):
             prev = V[n - 1]
-            Q = self.p[None] + _interp(prev, rem, delta)
-            Q = np.where(feas, Q, -np.inf)
-            best = Q.max(axis=2)                                           # (G+1, S)
+            Q = np.where(feas, self.p[None] + _interp(prev, rem, delta), -np.inf)
+            best = Q.max(axis=3)                                                    # (G+1, T, S)
+            vp = (np.where(np.isfinite(best), best, 0.0) * self.pi_s[None]).sum(axis=2)  # (G+1, T)
             # -1e9 rather than -inf marks "cannot probe", so interpolation never makes nan
-            vp = np.where(probe_ok, (np.where(np.isfinite(best), best, 0.0) * self.pi[None]).sum(axis=1), -1e9)
-            vd = np.where(feas_d, self.pd[None] + _interp(prev, rem_d, delta), -np.inf).max(axis=1)
+            vp = np.where(probe_ok[:, None], vp, -1e9)
+            vd = np.where(feas_d, self.pd[None] + _interp(prev, rem_d, delta), -np.inf).max(axis=2)
             Vp[n] = vp
-            V[n] = np.maximum(np.maximum(prev, vd), vp)
+            per_t = np.maximum(np.maximum(prev[:, None], vd), vp)                   # (G+1, T)
+            V[n] = (per_t * self.pi[None]).sum(axis=1)
         self.tables[key] = (V, Vp)
         return V, Vp
 
@@ -146,27 +233,66 @@ class DPOracle(Policy):
     def decide(self, step: Step) -> np.ndarray:
         E = len(step.idx)
         n = step.n_left
+        t = self._text_step(step)
+        prev = self.V[n - 1]
         if step.stage == 0:
-            prev = self.V[n - 1]
             # columns: probe, skip, then direct T0 T1 T2 C0 C1 C2. argmax takes the first of
             # equal values, so ties go to probing, then skipping, then cheaper direct answers
-            codes = np.array([P0, SKIP, T0, T1, T2, C0, C1, C2])
+            codes = np.array([P0, SKIP, *DIRECT])
             opts = np.full((E, len(codes)), -np.inf)
-            opts[:, 0] = np.where(step.feasible(P0), _interp(self.Vp[n], step.left, self.delta), -np.inf)
+            opts[:, 0] = np.where(step.feasible(P0), _interp_col(self.Vp[n], step.left, t, self.delta), -np.inf)
             opts[:, 1] = _interp(prev, step.left, self.delta)
             for j in range(6):
-                rem = step.left - self.cd[j]
-                v = self.pd[j] + _interp(prev, np.maximum(rem, 0.0), self.delta)
-                opts[:, 2 + j] = np.where(step.feasible(int(ACTIONS[j])) & (rem >= -1e-15), v, -np.inf)
+                rem = step.left - self.cd[t, j]
+                v = self.pd[t, j] + _interp(prev, np.maximum(rem, 0.0), self.delta)
+                ok = step.feasible(int(DIRECT[j])) & (rem >= -1e-15) & self.allowed[t, j]
+                opts[:, 2 + j] = np.where(ok, v, -np.inf)
             return codes[np.argmax(opts, axis=1)]
         s = self.bins(step.sig("p0"), step.sig("p_amb"))
-        prev = self.V[n - 1]
         Q = np.empty((E, len(ACTIONS)))
         for j, a in enumerate(ACTIONS):
-            rem = step.left - self.c[s, j]
-            Q[:, j] = self.p[s, j] + _interp(prev, np.maximum(rem, 0.0), self.delta)
-            Q[:, j] = np.where(step.feasible(int(a)) & (rem >= -1e-15), Q[:, j], -np.inf)
+            rem = step.left - self.c[t, s, j]
+            q = self.p[t, s, j] + _interp(prev, np.maximum(rem, 0.0), self.delta)
+            Q[:, j] = np.where(step.feasible(int(a)) & (rem >= -1e-15) & self.allowed[t, j], q, -np.inf)
         return ACTIONS[np.argmax(Q, axis=1)]
 
 
-__all__ = ["DPOracle", "ACTIONS", "C1", "C2", "T1", "T2"]
+class AmbiguityOracleDP(DPOracle):
+    """Reference: clarifies exactly when the question is ambiguous, using the true label.
+
+    Same DP, with the text axis replaced by is_ambiguous and the actions restricted: clarify
+    actions only on ambiguous questions, plain answers only on clear ones. Tier choice and budget
+    pacing stay optimal for the DP's model. Under a tight budget the runner can still downgrade an
+    unaffordable clarify, so "exactly" holds whenever a clarify fits.
+    """
+    name, label = "ambiguity_oracle", "Ambiguity oracle (clarify iff ambiguous)"
+
+    def _text_calib(self, env, T):
+        self.text_edges = np.array([0.5])
+        return env.is_amb.astype(int), 2
+
+    def _text_step(self, step):
+        return step.env.is_amb[step.idx].astype(int)      # the oracle reads the label on purpose
+
+    def _allowed(self, T):
+        allowed = np.ones((2, len(ACTIONS)), bool)
+        allowed[0, IS_CLARIFY] = False                      # clear: never clarify
+        allowed[1, :6] = IS_CLARIFY[:6]                     # ambiguous: always clarify
+        return allowed
+
+
+class ClarifyAllDP(DPOracle):
+    """Reference: clarifies every question, blind to ambiguity. Same DP, clarify actions only."""
+    name, label = "clarify_all", "Clarify every question (blind)"
+
+    def _text_calib(self, env, T):
+        self.text_edges = np.array([])
+        return np.zeros(env.n, int), 1
+
+    def _allowed(self, T):
+        allowed = np.ones((1, len(ACTIONS)), bool)
+        allowed[0, :6] = IS_CLARIFY[:6]
+        return allowed
+
+
+__all__ = ["DPOracle", "AmbiguityOracleDP", "ClarifyAllDP", "ACTIONS", "C1", "C2", "T1", "T2"]

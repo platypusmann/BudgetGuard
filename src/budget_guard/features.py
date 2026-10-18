@@ -2,7 +2,8 @@
 
 One row per pid in prompts.jsonl (raw and clarified prompts). Columns:
   ids          pid, qid, variant, split, pilot
-  question     is_ambiguous, n_interp, time_sensitive, q_chars, q_words
+  question     question (the raw text, for the free text ambiguity detector), is_ambiguous,
+               n_interp, time_sensitive, q_chars, q_words
   per tier k   t{k}_present, t{k}_n_in, t{k}_n_out, t{k}_usd (as charged), t{k}_hit_max,
                t{k}_lp_mean, t{k}_lp_min, t{k}_lp_sum, t{k}_p_first, t{k}_ent,
                t{k}_em, t{k}_lenient, t{k}_lenient_plus, t{k}_f1
@@ -60,7 +61,7 @@ def build_features(data_dir: Path = DATA):
     meta = {}
     for name in ("calib", "tune", "test"):
         for r in iter_jsonl(splits_dir / f"{name}.jsonl"):
-            meta[r["qid"]] = {"is_ambiguous": r["is_ambiguous"], "n_interp": r["n_interpretations"],
+            meta[r["qid"]] = {"question": r["question"], "is_ambiguous": r["is_ambiguous"], "n_interp": r["n_interpretations"],
                               "time_sensitive": r["time_sensitive"], "q_chars": len(r["question"]),
                               "q_words": len(r["question"].split())}
 

@@ -63,6 +63,11 @@ class TunedThreshold(ThresholdRule):
         self.tau, self.kappa = nearest(self.params, B)
 
 
+def _p_text(step: Step) -> np.ndarray:
+    """The free text ambiguity score, or 0.5 everywhere when the env has none."""
+    return step.sig("p_text") if "p_text" in step.env.signals else np.full(len(step.idx), 0.5)
+
+
 class Recorder:
     """Wraps a policy and keeps what it saw and chose at its final decision."""
 
@@ -80,12 +85,14 @@ class Recorder:
         if step.stage == 0:
             m = step.active
             self.rows0.append({"slack": step.left[m] / (step.n_left * self.u2), "left_frac": step.left[m] / max(step.B, 1e-300),
-                               "n_left_frac": np.full(m.sum(), step.n_left / step.K), "action": act[m]})
+                               "n_left_frac": np.full(m.sum(), step.n_left / step.K), "p_text": _p_text(step)[m],
+                               "action": act[m]})
         if step.stage >= 1:
             m = step.active
             rec = {"slack": step.left[m] / (step.n_left * self.u2), "u": 1 - step.sig("p0")[m],
                    "p_amb": step.sig("p_amb")[m], "left_frac": step.left[m] / max(step.B, 1e-300),
-                   "n_left_frac": np.full(m.sum(), step.n_left / step.K), "action": act[m]}
+                   "n_left_frac": np.full(m.sum(), step.n_left / step.K), "p_text": _p_text(step)[m],
+                   "action": act[m]}
             if self.keep_x0:
                 rec["x0"] = step.sig("x0")[m]
             self.rows.append(rec)

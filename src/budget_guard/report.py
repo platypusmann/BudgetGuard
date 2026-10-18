@@ -19,18 +19,20 @@ COLORS = {
     "threshold_fixed": "#6250d6",
 }
 GRAY = {"always_tier0": "#9a9893", "always_tier1": "#7c7a75", "always_tier2": "#5d5c58",
-        "random_matched": "#b5b3ad", "hindsight_oracle": "#3f3e3b"}
+        "random_matched": "#b5b3ad", "hindsight_oracle": "#3f3e3b", "clarify_all": "#c9c7c1",
+        "ambiguity_oracle": "#85837d"}
 LABEL = {
     "dp_oracle": "DP oracle", "learned_router": "Learned router", "slack_schedule": "Slack schedule",
     "threshold_tuned": "Threshold tuned per budget", "cascade_frugal": "FrugalGPT cascade",
     "routellm": "RouteLLM-style", "threshold_fixed": "Fixed threshold (ReDAct)",
     "always_tier0": "Always Tier 0", "always_tier1": "Always Tier 1", "always_tier2": "Always Tier 2",
     "random_matched": "Random, matched spend", "hindsight_oracle": "Hindsight oracle",
+    "clarify_all": "Clarify every question (blind)", "ambiguity_oracle": "Ambiguity oracle (clarify iff ambiguous)",
 }
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 TABLE_POLICIES = ["always_tier0", "always_tier1", "always_tier2", "random_matched", "threshold_fixed",
                   "threshold_tuned", "cascade_frugal", "routellm", "slack_schedule", "learned_router",
-                  "dp_oracle", "hindsight_oracle"]
+                  "dp_oracle", "clarify_all", "ambiguity_oracle", "hindsight_oracle"]
 
 
 def _style(ax, title, xlabel, ylabel):
@@ -59,7 +61,7 @@ def _policy_line(ax, d, name, x, y="accuracy", ci=True):
     d = d.sort_values(x)
     color = COLORS.get(name, GRAY.get(name, INK2))
     main = name in COLORS
-    style = "--" if name == "hindsight_oracle" else "-"
+    style = "--" if name in ("hindsight_oracle", "ambiguity_oracle", "clarify_all") else "-"
     ax.plot(d[x], d[y], style, color=color, linewidth=2 if main else 1.5, marker="o", markersize=5 if main else 4,
             markeredgecolor=SURFACE, markeredgewidth=1, label=LABEL.get(name, name), zorder=3 if main else 2)
     if ci and "acc_ci_lo" in d and y == "accuracy":

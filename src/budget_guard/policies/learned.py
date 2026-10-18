@@ -1,9 +1,10 @@
 """Budget-conditioned learned router and the RouteLLM-style baseline.
 
 learned_router follows the proposal's section 3.2. A small model takes the Tier 0 features, the
-calibrated p0 and p_amb, log remaining budget per remaining question (in u2), remaining budget as a
-share of B and remaining questions as a share of K, and outputs a distribution over the final
-actions. It is trained by behaviour cloning on the DP oracle's decisions on calib streams at every
+calibrated p0 and p_amb, the free text ambiguity score p_text, log remaining budget per remaining
+question (in u2), remaining budget as a share of B and remaining questions as a share of K, and
+outputs a distribution over the final actions. Its first-move head (probe, skip or answer
+directly) sees the budget inputs and p_text, the only signal that is free before any call. It is trained by behaviour cloning on the DP oracle's decisions on calib streams at every
 budget in the grid, so one model covers all budgets. The model class (multinomial logistic or a
 one hidden layer MLP) is picked on tune. The PPO-Lagrangian fine-tune from the proposal is out of
 scope here (see DECISIONS.md), and masking keeps the cap hard regardless.
@@ -19,13 +20,17 @@ import numpy as np
 
 from ..episodes import C0, C1, C2, P0, SKIP, T0, T1, T2, Env, Step, run
 from .base import FitContext, Policy, grid_search, nearest, quantile_thresholds, threshold_action
-from .threshold import Recorder
+from .threshold import Recorder, _p_text
 
 FINAL_ACTIONS = np.array([T0, T1, T2, C0, C1, C2, SKIP])
 
 
-def router_features(x0: np.ndarray, p0, pa, slack, left_frac, n_left_frac) -> np.ndarray:
-    return np.column_stack([x0, p0, pa, np.log(np.maximum(slack, 0) + 1e-3), left_frac, n_left_frac])
+def router_features(x0: np.ndarray, p0, pa, pt, slack, left_frac, n_left_frac) -> np.ndarray:
+    return np.column_stack([x0, p0, pa, pt, np.log(np.maximum(slack, 0) + 1e-3), left_frac, n_left_frac])
+
+
+def first_move_features(pt, slack, left_frac, n_left_frac) -> np.ndarray:
+    return np.column_stack([np.log(np.maximum(slack, 0) + 1e-3), left_frac, n_left_frac, pt])
 
 
 class LearnedRouter(Policy):
@@ -56,7 +61,8 @@ class LearnedRouter(Policy):
         d = {k: np.concatenate([t[k] for t in tabs]) for k in tabs[0]}
         d0 = {k: np.concatenate([t[k] for t in tabs0]) for k in tabs0[0]}
         self._fit_first_move(d0)
-        X = router_features(d["x0"], 1 - d["u"], d["p_amb"], d["slack"], d["left_frac"], d["n_left_frac"])
+        X = router_features(d["x0"], 1 - d["u"], d["p_amb"], d["p_text"], d["slack"], d["left_frac"],
+                            d["n_left_frac"])
         y = d["action"]
         self.n_train = len(y)
         mids = sorted(ctx.budgets)[1::max(1, len(ctx.budgets) // 3)][:3] or list(ctx.budgets)
@@ -79,15 +85,15 @@ class LearnedRouter(Policy):
         y0 = d0["action"]
         self.first_const = int(y0[0]) if len(np.unique(y0)) == 1 else None
         if self.first_const is None:
-            X0 = np.column_stack([np.log(np.maximum(d0["slack"], 0) + 1e-3), d0["left_frac"], d0["n_left_frac"]])
+            X0 = first_move_features(d0["p_text"], d0["slack"], d0["left_frac"], d0["n_left_frac"])
             self.first_model = LogisticRegression(C=1.0, max_iter=3000).fit(X0, y0)
 
     def _first_move(self, step: Step) -> np.ndarray:
         E = len(step.idx)
         if self.first_const is not None:
             return np.full(E, self.first_const)
-        X0 = np.column_stack([np.log(np.maximum(step.left / (step.n_left * self.u2), 0) + 1e-3),
-                              step.left / max(step.B, 1e-300), np.full(E, step.n_left / step.K)])
+        X0 = first_move_features(_p_text(step), step.left / (step.n_left * self.u2),
+                                 step.left / max(step.B, 1e-300), np.full(E, step.n_left / step.K))
         proba = self.first_model.predict_proba(X0)
         cls = self.first_model.classes_
         score = np.where(np.column_stack([step.feasible(int(a)) for a in cls]), proba, -np.inf)
@@ -97,7 +103,7 @@ class LearnedRouter(Policy):
         if step.stage == 0:
             return self._first_move(step)
         p0, pa = step.sig("p0"), step.sig("p_amb")
-        X = router_features(np.nan_to_num(step.sig("x0")), np.nan_to_num(p0), np.nan_to_num(pa),
+        X = router_features(np.nan_to_num(step.sig("x0")), np.nan_to_num(p0), np.nan_to_num(pa), _p_text(step),
                             step.left / (step.n_left * self.u2), step.left / max(step.B, 1e-300),
                             np.full(len(step.idx), step.n_left / step.K))
         proba = self.model.predict_proba(X)

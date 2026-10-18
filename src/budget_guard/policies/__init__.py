@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .base import FitContext, Policy
 from .cascade import FrugalCascade
-from .dp import DPOracle
+from .dp import AmbiguityOracleDP, ClarifyAllDP, DPOracle
 from .learned import LearnedRouter, RouteLLM
 from .oracle import HindsightOracle
 from .simple import AlwaysTier, RandomMatched
@@ -15,7 +15,7 @@ def build_all(include_routellm: bool = True) -> list[Policy]:
                          RandomMatched(), FrugalCascade()]
     if include_routellm:
         out.append(RouteLLM())
-    out += [DPOracle(), SlackSchedule(), LearnedRouter(), HindsightOracle()]
+    out += [DPOracle(), SlackSchedule(), LearnedRouter(), ClarifyAllDP(), AmbiguityOracleDP(), HindsightOracle()]
     return out
 
 
@@ -32,5 +32,6 @@ def fit_all(policies: list[Policy], ctx: FitContext, verbose: bool = True) -> li
 
 
 __all__ = ["build_all", "fit_all", "FitContext", "Policy", "AlwaysTier", "RandomMatched", "FixedThreshold",
-           "TunedThreshold", "SlackSchedule", "FrugalCascade", "DPOracle", "LearnedRouter", "RouteLLM",
+           "TunedThreshold", "SlackSchedule", "FrugalCascade", "DPOracle", "AmbiguityOracleDP", "ClarifyAllDP",
+           "LearnedRouter", "RouteLLM",
            "HindsightOracle"]
