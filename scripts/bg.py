@@ -11,6 +11,10 @@
 
   python scripts/bg.py splits         build the frozen AmbigNQ splits (downloads from Hugging Face, once)
   python scripts/bg.py estimate       worst case API cost of everything still missing (spends nothing)
+  python scripts/bg.py cache ...      any cache_api command, for example
+                                        cache estimate --tier tier1 --pilot
+                                        cache sync --tier tier2 --pilot --cap 0.25
+                                        cache batch-submit --tier tier2 --cap 4.0
 
 Anything after the stage name is passed through, for example
   python scripts/bg.py evaluate --data-dir data/synthetic --eval-split tune
@@ -58,6 +62,8 @@ def main() -> None:
         py("-m", "budget_guard.report", *extra)
     elif stage == "test":
         py("-m", "pytest", *extra)
+    elif stage == "cache":
+        py("-m", "budget_guard.cache_api", *extra)
     elif stage == "estimate":
         for tier in ("tier1", "tier2"):
             py("-m", "budget_guard.cache_api", "estimate", "--tier", tier, *extra)

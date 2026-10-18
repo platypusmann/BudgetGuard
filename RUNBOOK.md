@@ -2,7 +2,7 @@
 
 Your exact manual steps, in order. The total worst case is about $3.65, a pilot under $0.20 plus a batch run of about $3.45. Tier 0 is free on Kaggle. Nothing here runs by itself, and every paid command prints its worst case and refuses to pass its cap.
 
-Run everything from the repo root. Commands are PowerShell.
+Run everything from the repo root. Commands are PowerShell. Always go through `python scripts/bg.py`, which puts `src` on the Python path for you. Calling `python -m budget_guard...` directly fails with ModuleNotFoundError unless you set `$env:PYTHONPATH = "src"` first.
 
 ## 0. One-time setup
 
@@ -43,8 +43,8 @@ Never pass `--force` after this point. `split.verify()` will refuse to tune or e
 ## 4. Estimate the pilot (free)
 
 ```
-python -m budget_guard.cache_api estimate --tier tier1 --pilot
-python -m budget_guard.cache_api estimate --tier tier2 --pilot
+python scripts/bg.py cache estimate --tier tier1 --pilot
+python scripts/bg.py cache estimate --tier tier2 --pilot
 ```
 
 Expect about 450 prompts each, with a sync worst case of about $0.01 for Tier 1 and $0.17 for Tier 2. If either is far off, stop and check `prompts.jsonl`.
@@ -52,8 +52,8 @@ Expect about 450 prompts each, with a sync worst case of about $0.01 for Tier 1 
 ## 5. Pilot sync (about $0.18 worst case)
 
 ```
-python -m budget_guard.cache_api sync --tier tier1 --pilot --cap 0.05
-python -m budget_guard.cache_api sync --tier tier2 --pilot --cap 0.25
+python scripts/bg.py cache sync --tier tier1 --pilot --cap 0.05
+python scripts/bg.py cache sync --tier tier2 --pilot --cap 0.25
 ```
 
 If a command dies or some calls fail, rerun the same line. It only calls what's missing and never pays twice. `data/cache/ledger.jsonl` keeps the running spend.
@@ -82,22 +82,22 @@ For each tier, look at:
 ## 8. Batch Tier 1 and Tier 2 (about $3.45 worst case)
 
 ```
-python -m budget_guard.cache_api estimate --tier tier1
-python -m budget_guard.cache_api estimate --tier tier2
+python scripts/bg.py cache estimate --tier tier1
+python scripts/bg.py cache estimate --tier tier2
 ```
 
 Check the batch worst case: about $0.17 for Tier 1 and $3.3 for Tier 2. Pilot prompts are already cached, so they're skipped. Then:
 
 ```
-python -m budget_guard.cache_api batch-submit --tier tier1 --cap 0.5
-python -m budget_guard.cache_api batch-submit --tier tier2 --cap 4.0
+python scripts/bg.py cache batch-submit --tier tier1 --cap 0.5
+python scripts/bg.py cache batch-submit --tier tier2 --cap 4.0
 ```
 
 Batches finish within 24 hours. Check on them, as often as you like, with
 
 ```
-python -m budget_guard.cache_api batch-collect --tier tier1
-python -m budget_guard.cache_api batch-collect --tier tier2
+python scripts/bg.py cache batch-collect --tier tier1
+python scripts/bg.py cache batch-collect --tier tier2
 ```
 
 until both say "nothing to collect". Then run `estimate` again. Anything still missing (a failed line or an expired batch) shows up there. Submit again with the same `batch-submit` line, and only the missing prompts are sent.
@@ -112,7 +112,7 @@ This grades all three tiers, builds the feature table, fits on calib, tunes on t
 
 1. Check that `results/run_info.json` says `"data": "REAL"` and that the figures no longer carry the SYNTHETIC stamp.
 2. Copy `results/results_table.md` into the README results section, swap the synthetic bullet points for what the real run shows, and drop the SYNTHETIC wording.
-3. Robustness check on EM: `python -m budget_guard.evaluate --metric em --out results/em`.
+3. Robustness check on EM: `python scripts/bg.py evaluate --metric em --out results/em`.
 4. Commit `data/cache`, `results/` and the README. Anyone can then reproduce every number for $0.
 
 Test is touched exactly once, in step 9. If you change anything after looking at test numbers, say so in DECISIONS.md.
