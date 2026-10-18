@@ -8,6 +8,10 @@ Answers two questions before the full run, with honest uncertainty:
      AUROC is reported as is. Below 0.5 means the feature runs the other way (entropy should).
   2. Does clarifying help? Per tier, on ambiguous pilot questions, the mean accuracy of the
      clarified prompt minus the raw prompt, with a paired bootstrap CI over questions.
+  4. Risk-coverage for Tier 0 (results/pilot_risk_coverage.csv). Tier 0 answers are sorted by
+     lp_min and separately by sc_agree, and the most confident 5, 10, 20 and 40 percent are kept.
+     Each slice's accuracy is reported with a bootstrap CI, next to Tier 1 and Tier 2 overall and
+     on the same questions, because a confident Tier 0 slice is also an easier slice.
   3. Does cross-tier agreement on the raw prompt flag ambiguity? agree_12 is whether the Tier 1
      and Tier 2 answers match after SQuAD normalization, agree_0_12 whether the Tier 0 greedy
      answer matches either. Disagreement should mean ambiguity, so AUROC below 0.5 is the
@@ -115,13 +119,111 @@ def run(data_dir: Path = DATA, out: Path = ROOT / "results", n_boot: int = 2000,
                          "ci_lo": lo, "ci_hi": hi})
 
     rows += _agreement_rows(data_dir, pilot, n_boot)
+    rc = risk_coverage(data_dir, pilot, n_boot)
     df = pd.DataFrame(rows)
     df.insert(0, "data", "SYNTHETIC" if is_synthetic(data_dir) else "REAL")
     out.mkdir(parents=True, exist_ok=True)
     path = out / "pilot_signal_check.csv"
     df.to_csv(path, index=False)
     _print(df, len(pilot), path)
+    if rc is not None:
+        rc.insert(0, "data", df["data"].iloc[0])
+        rc_path = out / "pilot_risk_coverage.csv"
+        rc.to_csv(rc_path, index=False)
+        _print_rc(rc, rc_path)
     return df
+
+
+COVERAGES = (0.05, 0.10, 0.20, 0.40)
+
+
+def top_share_accuracy(score: np.ndarray, correct: np.ndarray, coverage: float, others=()) -> list[float]:
+    """Accuracy of the top `coverage` share by score, tie aware.
+
+    Answers strictly above the cut value are in, and the tied group at the cut is taken in
+    fractionally at its own mean accuracy, so sc_agree, with only six distinct values, gives a
+    result that does not depend on arbitrary sort order. `others` are more correctness arrays
+    scored on exactly the same slice.
+    """
+    n = len(score)
+    k = coverage * n
+    order = np.sort(score)[::-1]
+    cut = order[min(int(np.ceil(k)) - 1, n - 1)]
+    above, tied = score > cut, score == cut
+    take = k - above.sum()
+    out = []
+    for c in (correct, *others):
+        c = c.astype(float)
+        out.append(float((c[above].sum() + take * c[tied].mean()) / k))
+    return out
+
+
+def risk_coverage(data_dir: Path, pilot: dict, n_boot: int):
+    """Tier 0 accuracy on its most confident slices, against Tier 1 and 2 on the same questions."""
+    import pandas as pd
+
+    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl")}
+    graded = {}
+    for tier in TIERS:
+        try:
+            g = load_graded(tier, data_dir)
+        except Exception:
+            return None
+        graded[tier] = dict(zip(g["pid"], g["lenient"]))
+    qs = [q for q in pilot if f"{q}::orig" in feats0 and all(f"{q}::orig" in graded[t] for t in TIERS)]
+    if not qs:
+        return None
+    pid = [f"{q}::orig" for q in qs]
+    c0, c1, c2 = (np.array([bool(graded[t][p]) for p in pid]) for t in TIERS)
+    rng = np.random.default_rng(31)
+    boots = rng.integers(0, len(qs), size=(n_boot, len(qs)))
+    rows = []
+
+    def ci(vals):
+        return float(np.quantile(vals, 0.025)), float(np.quantile(vals, 0.975))
+
+    for tier, c in (("tier1", c1), ("tier2", c2)):
+        lo, hi = ci(c[boots].mean(axis=1))
+        rows.append({"sort_by": "none", "coverage": 1.0, "n_questions": len(qs), "slice": f"{tier} overall",
+                     "accuracy": float(c.mean()), "ci_lo": lo, "ci_hi": hi})
+    for f in ("lp_min", "sc_agree"):
+        x = np.array([np.nan if feats0[p].get(f) is None else float(feats0[p][f]) for p in pid])
+        x = np.nan_to_num(x, nan=-np.inf)                          # missing confidence sorts last
+        for cov in COVERAGES:
+            # share of all questions tied at the cut value. Above the coverage, the slice is one tie group
+            cut = np.sort(x)[::-1][min(int(np.ceil(cov * len(x))) - 1, len(x) - 1)]
+            tied_share = float((x == cut).mean())
+            a0, a1, a2 = top_share_accuracy(x, c0, cov, (c1, c2))
+            b = np.array([top_share_accuracy(x[i], c0[i], cov, (c1[i], c2[i])) for i in boots])
+            for name, val, col in (("tier0 slice", a0, b[:, 0]), ("tier1 on same questions", a1, b[:, 1]),
+                                   ("tier2 on same questions", a2, b[:, 2]),
+                                   ("tier0 minus tier1, same questions", a0 - a1, b[:, 0] - b[:, 1])):
+                lo, hi = ci(col)
+                rows.append({"sort_by": f, "coverage": cov, "n_questions": round(cov * len(qs), 1), "slice": name,
+                             "accuracy": val, "ci_lo": lo, "ci_hi": hi, "share_tied_at_cut": tied_share})
+    return pd.DataFrame(rows)
+
+
+def _print_rc(rc, path: Path) -> None:
+    fmt = lambda r: f"{r.accuracy:.2f} [{r.ci_lo:.2f}, {r.ci_hi:.2f}]"  # noqa: E731
+    print(f"\nTier 0 risk-coverage on {int(rc[rc['sort_by'] == 'none']['n_questions'].iloc[0])} raw pilot prompts, "
+          "lenient accuracy [bootstrap 95 percent CI]")
+    for r in rc[rc["sort_by"] == "none"].itertuples():
+        print(f"  {r.slice:16s} {fmt(r)}")
+    print(f"  {'sorted by':9s} {'cover':>5s} {'n':>5s} {'tier0 slice':>18s} {'tier1 same qs':>18s} "
+          f"{'tier2 same qs':>18s} {'tier0 - tier1':>20s}")
+    for (f, cov), g in rc[rc["sort_by"] != "none"].groupby(["sort_by", "coverage"], sort=False):
+        g = g.set_index("slice")
+        cells = [fmt(next(g.loc[[s]].itertuples())) for s in ("tier0 slice", "tier1 on same questions",
+                                                              "tier2 on same questions")]
+        d = g.loc["tier0 minus tier1, same questions"]
+        print(f"  {f:9s} {cov:5.0%} {g['n_questions'].iloc[0]:5.0f} {cells[0]:>18s} {cells[1]:>18s} {cells[2]:>18s} "
+              f"{d['accuracy']:+.2f} [{d['ci_lo']:+.2f}, {d['ci_hi']:+.2f}]")
+    flat = rc[(rc["sort_by"] != "none") & (rc["share_tied_at_cut"] > rc["coverage"])]
+    for f, g in flat.groupby("sort_by"):
+        print(f"  note: {g['share_tied_at_cut'].max():.0%} of answers share the top {f} value, so coverages "
+              f"{', '.join(f'{c:.0%}' for c in sorted(g['coverage'].unique()))} are all the same tie group")
+    print(f"wrote {path}")
 
 
 def _agreement_rows(data_dir: Path, pilot: dict, n_boot: int) -> list[dict]:
