@@ -129,3 +129,23 @@ Every choice I made while building this out, with the reason. Newest sections go
 55. The README says plainly that the soft frontier here is a weaker two-tier rule, so the hard-cap DP sits above it rather than below. The toy's "price of the guarantee" comparison needs an uncapped version of the DP, which isn't built.
 
 56. Two features stayed out of scope: the PPO-Lagrangian fine-tune of the learned router, and a DP that can probe Tier 1 before deciding. Both are listed as limitations rather than half-built.
+
+## Pilot hand check and lenient_plus (2026-10-19)
+
+57. The pilot hand check came in at about 26 of 30 per tier for Tier 1 and Tier 2, against the 27 of 30 bar in the runbook. That count is Claude's read of the sampled rows, not mine. Every disagreement was a false negative, meaning lenient marked a right answer wrong. There were four patterns:
+    - Date order or format: "1 July 2017" against gold "July 1, 2017".
+    - Ordinals: "78th" against gold "78".
+    - Under-specified dates: "1963" against gold "July 1, 1963". Arguable, and left as wrong.
+    - Synonyms: "Plasma membrane" against gold "cell membrane". No string rule can fix this one.
+
+58. The primary metric is unchanged. Lenient was pre-registered before any real answers existed, and it stays the metric every headline number is reported on.
+
+59. lenient_plus is added as a secondary metric only. It's lenient after two more normalizations applied to both prediction and gold: ordinal suffixes are stripped from numbers, and complete day-month-year dates in either order are rewritten to one canonical token. It has no synonym handling, no looser containment and no partial date matching, so "1963" still fails against "July 1, 1963" and "plasma membrane" still fails against "cell membrane".
+
+60. lenient_plus also accepts anything lenient accepts. Collapsing a full date hides its year, so without this rule "September 14, 1814" stopped matching a gold of "1814", which lenient accepts. On the pilot, the literal version flipped 5 lenient matches to wrong, which would have made the secondary metric stricter than the primary in places. The rule adds no new partial date matching.
+
+61. lenient_plus was designed using calib pilot rows only. The test split was not read, graded or looked at. On the pilot it moves accuracy by very little: Tier 0 from 12.4 to 12.6 percent, Tier 1 from 43.2 to 43.7, Tier 2 from 51.4 to 51.9.
+
+62. evaluate must report the headline under both metrics and flag any policy whose ranking differs between them. The same decisions are rescored under lenient_plus, without refitting, so any change comes from the grader alone.
+
+63. My own hand count, to fill in: Tier 0 __ of 30, Tier 1 __ of 30, Tier 2 __ of 30.
