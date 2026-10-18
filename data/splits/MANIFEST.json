@@ -1,0 +1,30 @@
+{
+  "created_utc": "2026-10-17T09:50:48+00:00",
+  "dataset": "sewon/ambig_qa (light)",
+  "salts": {
+    "split": "split-v1",
+    "intent": "intent-v1",
+    "pilot": "pilot-v1"
+  },
+  "calib_pct_of_train": 70,
+  "stats": {
+    "amb_calib": 3362,
+    "amb_pilot": 128,
+    "amb_test": 1172,
+    "amb_tune": 1387,
+    "n_calib": 7119,
+    "n_pilot": 300,
+    "n_prompts": 17959,
+    "n_test": 2002,
+    "n_tune": 2917,
+    "raw_train": 10036,
+    "raw_validation": 2002
+  },
+  "sha256": {
+    "calib.jsonl": "7d76f801bbd8ddc9fefbd560d74d718e7db8c145837bf3d7fa9efe31363cc9ac",
+    "pilot.jsonl": "24ad77d112b879685be8a2d0d7b8586267efeeb900aba8ba77531d035ebeb3ab",
+    "prompts.jsonl": "fee680bc070ca0023195b476fe246b38bb1db099d6ac1b3459b2da1665cd8452",
+    "test.jsonl": "3e639ad9158c4e7e8bbc10e6cebb4473a4c2bec147c3d8bf44b286f082c1f50e",
+    "tune.jsonl": "bf1a44b4562c573b966f6220c807bb71086163069d9b179fa161da4779f73c4d"
+  }
+}
