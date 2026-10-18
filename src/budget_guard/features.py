@@ -131,9 +131,12 @@ def load_features(data_dir: Path = DATA):
 
 # ---------------------------------------------------------------- embeddings
 
-def _questions(data_dir: Path) -> tuple[list[str], list[str]]:
+ALL_SPLITS = ("calib", "tune", "test")
+
+
+def _questions(data_dir: Path, splits: tuple[str, ...] = ALL_SPLITS) -> tuple[list[str], list[str]]:
     qids, texts = [], []
-    for name in ("calib", "tune", "test"):
+    for name in splits:
         for r in iter_jsonl(Path(data_dir) / "splits" / f"{name}.jsonl"):
             qids.append(r["qid"])
             texts.append(r["question"])
@@ -160,19 +163,29 @@ def _embed_minilm(texts: list[str], batch: int = 64) -> np.ndarray:
     return np.vstack(chunks)
 
 
-def build_embeddings(data_dir: Path = DATA, backend: str = "hash") -> Path:
+def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple[str, ...] = ALL_SPLITS) -> Path:
+    """Embed the questions of `splits` and add them to the on-disk cache.
+
+    Incremental: only questions not already cached are embedded, so a calib and tune run now and
+    a test run at final evaluation share one cache, and test is never embedded before it is needed.
+    """
     data_dir = Path(data_dir)
-    qids, texts = _questions(data_dir)
+    qids, texts = _questions(data_dir, splits)
     out = data_dir / "features" / f"emb_{backend}.npy"
     idx = data_dir / "features" / f"emb_{backend}_qids.json"
-    if out.exists() and idx.exists() and json.loads(idx.read_text()) == qids:
-        print(f"embeddings: {out} already up to date")
+    have_qids: list[str] = json.loads(idx.read_text()) if out.exists() and idx.exists() else []
+    have = set(have_qids)
+    todo = [(q, t) for q, t in zip(qids, texts) if q not in have]
+    if not todo:
+        print(f"embeddings: {out} already has all {len(qids)} questions of {', '.join(splits)}")
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    emb = _embed_minilm(texts) if backend == "minilm" else _embed_hash(texts)
+    new_texts = [t for _, t in todo]
+    new = _embed_minilm(new_texts) if backend == "minilm" else _embed_hash(new_texts)
+    emb = np.vstack([np.load(out), new]) if have_qids else new
     np.save(out, emb)
-    idx.write_text(json.dumps(qids))
-    print(f"embeddings: {emb.shape} {backend} -> {out}")
+    idx.write_text(json.dumps(have_qids + [q for q, _ in todo]))
+    print(f"embeddings: added {len(todo)} {backend} vectors, {emb.shape[0]} cached -> {out}")
     return out
 
 
