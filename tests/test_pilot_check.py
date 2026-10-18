@@ -52,3 +52,14 @@ def test_risk_coverage_written(world, tmp_path):
     assert set(rc["sort_by"]) == {"none", "lp_min", "sc_agree"}
     assert set(rc[rc["sort_by"] == "lp_min"]["coverage"]) == set(pilot_check.COVERAGES)
     assert {"tier1 overall", "tier2 overall", "tier0 slice", "tier1 on same questions"} <= set(rc["slice"])
+
+
+def test_tier0_as_probe_written(world, tmp_path):
+    import pandas as pd
+
+    pilot_check.run(world, tmp_path, n_boot=100)
+    t = pd.read_csv(tmp_path / "tier0_as_probe.csv")
+    assert set(t["feature"]) == set(pilot_check.PROBE_FEATURES)
+    assert set(t["target"]) == set(pilot_check.PROBE_TARGETS)
+    pos = t.groupby("target")["n_pos"].first()
+    assert pos["tier2_right_tier1_wrong"] <= min(pos["tier1_right"], pos["tier2_right"]) or pos["tier1_right"] == 0

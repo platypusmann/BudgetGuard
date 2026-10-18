@@ -12,6 +12,10 @@ Answers two questions before the full run, with honest uncertainty:
      lp_min and separately by sc_agree, and the most confident 5, 10, 20 and 40 percent are kept.
      Each slice's accuracy is reported with a bootstrap CI, next to Tier 1 and Tier 2 overall and
      on the same questions, because a confident Tier 0 slice is also an easier slice.
+  5. Is Tier 0 a useful probe for the other tiers (results/tier0_as_probe.csv)? AUROC of Tier 0's
+     lp_min, lp_mean, sc_agree and sc_distinct for predicting, on the raw prompt, (a) Tier 1 is
+     right, (b) Tier 2 is right and (c) Tier 2 is right while Tier 1 is wrong, the event that
+     makes paying for Tier 2 over Tier 1 worth it.
   3. Does cross-tier agreement on the raw prompt flag ambiguity? agree_12 is whether the Tier 1
      and Tier 2 answers match after SQuAD normalization, agree_0_12 whether the Tier 0 greedy
      answer matches either. Disagreement should mean ambiguity, so AUROC below 0.5 is the
@@ -120,12 +124,18 @@ def run(data_dir: Path = DATA, out: Path = ROOT / "results", n_boot: int = 2000,
 
     rows += _agreement_rows(data_dir, pilot, n_boot)
     rc = risk_coverage(data_dir, pilot, n_boot)
+    t0p = tier0_as_probe(data_dir, pilot, n_boot)
     df = pd.DataFrame(rows)
     df.insert(0, "data", "SYNTHETIC" if is_synthetic(data_dir) else "REAL")
     out.mkdir(parents=True, exist_ok=True)
     path = out / "pilot_signal_check.csv"
     df.to_csv(path, index=False)
     _print(df, len(pilot), path)
+    if t0p is not None:
+        t0p.insert(0, "data", df["data"].iloc[0])
+        t0p_path = out / "tier0_as_probe.csv"
+        t0p.to_csv(t0p_path, index=False)
+        _print_t0p(t0p, t0p_path)
     if rc is not None:
         rc.insert(0, "data", df["data"].iloc[0])
         rc_path = out / "pilot_risk_coverage.csv"
@@ -223,6 +233,51 @@ def _print_rc(rc, path: Path) -> None:
     for f, g in flat.groupby("sort_by"):
         print(f"  note: {g['share_tied_at_cut'].max():.0%} of answers share the top {f} value, so coverages "
               f"{', '.join(f'{c:.0%}' for c in sorted(g['coverage'].unique()))} are all the same tie group")
+    print(f"wrote {path}")
+
+
+PROBE_FEATURES = ("lp_min", "lp_mean", "sc_agree", "sc_distinct")
+PROBE_TARGETS = ("tier1_right", "tier2_right", "tier2_right_tier1_wrong")
+
+
+def tier0_as_probe(data_dir: Path, pilot: dict, n_boot: int):
+    """AUROC of Tier 0 features for the other tiers' correctness on the raw prompt."""
+    import pandas as pd
+
+    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl")}
+    graded = {}
+    for tier in ("tier1", "tier2"):
+        try:
+            g = load_graded(tier, data_dir)
+        except Exception:
+            return None
+        graded[tier] = dict(zip(g["pid"], g["lenient"]))
+    pid = [f"{q}::orig" for q in pilot if f"{q}::orig" in feats0 and all(f"{q}::orig" in graded[t] for t in graded)]
+    if not pid:
+        return None
+    c1 = np.array([bool(graded["tier1"][p]) for p in pid])
+    c2 = np.array([bool(graded["tier2"][p]) for p in pid])
+    targets = {"tier1_right": c1, "tier2_right": c2, "tier2_right_tier1_wrong": c2 & ~c1}
+    rows = []
+    for j, f in enumerate(PROBE_FEATURES):
+        x = np.array([np.nan if feats0[p].get(f) is None else float(feats0[p][f]) for p in pid])
+        ok = np.isfinite(x)
+        for k, (name, y) in enumerate(targets.items()):
+            lo, hi = boot_auroc(x[ok], y[ok], n_boot, seed=500 + 10 * j + k)
+            rows.append({"feature": f, "target": name, "n": int(ok.sum()), "n_pos": int(y[ok].sum()),
+                         "auroc": auroc(x[ok], y[ok]), "ci_lo": lo, "ci_hi": hi})
+    return pd.DataFrame(rows)
+
+
+def _print_t0p(t, path: Path) -> None:
+    print(f"\nTier 0 features as a probe for the paid tiers, {int(t['n'].max())} raw pilot prompts. "
+          "AUROC [bootstrap 95 percent CI]")
+    pos = t.groupby("target")["n_pos"].first()
+    print(f"  {'feature':12s} " + " ".join(f"{c + f' ({pos[c]} pos)':>30s}" for c in PROBE_TARGETS))
+    for f, g in t.groupby("feature", sort=False):
+        g = g.set_index("target")
+        cells = [f"{g.at[c, 'auroc']:.2f} [{g.at[c, 'ci_lo']:.2f}, {g.at[c, 'ci_hi']:.2f}]" for c in PROBE_TARGETS]
+        print(f"  {f:12s} " + " ".join(f"{c:>30s}" for c in cells))
     print(f"wrote {path}")
 
 
