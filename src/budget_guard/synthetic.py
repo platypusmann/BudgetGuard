@@ -329,7 +329,9 @@ def build_world(out_dir: Path = SYNTH_DIR, n_train: int = 3000, n_val: int = 100
 
 
 def is_synthetic(data_dir: Path) -> bool:
-    return (Path(data_dir) / "SYNTHETIC").exists()
+    # is_file, not exists: on Windows data/SYNTHETIC case-insensitively matches the data/synthetic
+    # folder, which would stamp real results as synthetic
+    return (Path(data_dir) / "SYNTHETIC").is_file()
 
 
 def main(argv=None) -> None:

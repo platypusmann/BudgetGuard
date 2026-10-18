@@ -149,3 +149,7 @@ Every choice I made while building this out, with the reason. Newest sections go
 62. evaluate must report the headline under both metrics and flag any policy whose ranking differs between them. The same decisions are rescored under lenient_plus, without refitting, so any change comes from the grader alone.
 
 63. My own hand count, to fill in: Tier 0 __ of 30, Tier 1 __ of 30, Tier 2 __ of 30.
+
+64. Fixed a bug found while running the pilot check. The synthetic marker test was `(data_dir / "SYNTHETIC").exists()`, and Windows paths ignore case, so `data/SYNTHETIC` matched the `data/synthetic/` folder. The real evaluation would have stamped its CSVs and figures SYNTHETIC. It now requires the marker to be a file, and a test covers it.
+
+65. The pilot signal check (`python scripts/bg.py pilot-check`) reads pilot.jsonl, the cache rows of pilot pids and the graded files, nothing else. It deliberately doesn't go through features.py, which builds metadata rows for every split including test. It asserts that the pilot is a subset of calib and shares no qid with test. AUROC is reported raw, not flipped, so a feature that runs the other way (entropy, distinct answers) shows below 0.5. CIs are 2,000-resample percentile bootstraps over questions.

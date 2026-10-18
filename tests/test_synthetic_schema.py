@@ -70,3 +70,13 @@ def test_splits_fixture_is_real_format(world):
             "time_sensitive", "split"} <= set(row)
     p = next(iter_jsonl(world / "splits" / "prompts.jsonl"))
     assert p["pid"].endswith(("::orig", "::clar"))
+
+
+def test_real_data_dir_is_not_marked_synthetic(tmp_path):
+    """A data dir holding a synthetic/ subfolder is still real. Windows paths ignore case."""
+    from budget_guard.synthetic import is_synthetic
+
+    (tmp_path / "synthetic").mkdir()
+    (tmp_path / "synthetic" / "SYNTHETIC").write_text("{}")
+    assert not is_synthetic(tmp_path)
+    assert is_synthetic(tmp_path / "synthetic")
