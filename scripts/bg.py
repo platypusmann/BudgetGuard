@@ -85,7 +85,7 @@ def main() -> None:
         if has_data_dir(extra):
             sys.exit("the real stage always reads data/")
         py("-m", "budget_guard.grade")
-        py("-m", "budget_guard.features", "--embed", "minilm" if "--minilm" in extra else "hash")
+        py("-m", "budget_guard.features", "--include-test", "--embed", "minilm" if "--minilm" in extra else "hash")
         py("-m", "budget_guard.evaluate", *[a for a in extra if a != "--minilm"],
            *(["--embed", "minilm"] if "--minilm" in extra else []))
     else:

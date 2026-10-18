@@ -1,9 +1,9 @@
-slack_from_u2,first_move,clarify_when,tier2_when,tier1_when,after_clarify_tier2_when,after_clarify_tier1_when,dp_decisions
-0.0,P0,never,never,never,never,never,9205
-0.03,P0,never,never,u > 0.540,never,never,9258
-0.06,P0,never,never,always,never,always,3991
-0.1,P0,never,never,always,u < 0.702,u > 0.655,10702
-0.2,P0,never,never,always,never,u > 0.636,9801
-0.35,P0,never,u < 0.541,always,u > 0.837,u > 0.657,14027
-0.6,P0,p_amb > 0.682,u < 0.541,always,u > 0.636,u > 0.636,14782
-1.0,P0,p_amb > 0.405,u < 0.891,always,always,u > 0.578,7311
+design_sha256,slack_from_u2,first_move,clarify_when,tier2_when,tier1_when,after_clarify_tier2_when,after_clarify_tier1_when,dp_decisions
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.0,P0,never,never,never,never,never,9588
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.03,T1,never,never,u > 0.902,never,never,305
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.06,T1,never,never,always,always,always,1757
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.1,P0,never,never,always,always,always,6724
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.2,P0,p_amb > 0.710,never,always,always,always,6258
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.35,P0,p_amb > 0.710,never,always,always,always,11816
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.6,P0,p_amb > 0.463,never,always,always,always,14867
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,1.0,P0,p_amb > 0.432,never,always,always,always,5201

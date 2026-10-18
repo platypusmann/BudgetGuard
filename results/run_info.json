@@ -1,5 +1,33 @@
 {
   "data": "SYNTHETIC",
+  "design_sha256": "637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5",
+  "design_frozen": true,
+  "cache_completeness": {
+    "tier0": {
+      "rows": 17746,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 0
+    },
+    "tier1": {
+      "rows": 17746,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 90
+    },
+    "tier2": {
+      "rows": 17746,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 86
+    }
+  },
   "data_dir": "data\\synthetic",
   "eval_split": "test",
   "metric": "lenient",
@@ -54,12 +82,16 @@
       "grid": 800,
       "conf_bins": 8,
       "amb_bins": 3,
-      "text_bins_grid": [
-        1,
-        2,
-        3
-      ],
-      "prior_strength": 5
+      "prior_strength": 5,
+      "text_bins": {
+        "grid": [
+          1,
+          2,
+          3
+        ],
+        "select_on": "tune",
+        "min_gain_points": 0.5
+      }
     },
     "fixed_threshold": {
       "escalate_rate": 0.2,
@@ -77,114 +109,114 @@
     ]
   },
   "signal_auc_eval": {
-    "p0": 0.724,
-    "p_amb": 0.833,
-    "p1": 0.775,
-    "p_text": 0.681
+    "p0": 0.702,
+    "p_amb": 0.598,
+    "p1": 0.747,
+    "p_text": 0.652
   },
   "pool_sizes": {
-    "tune": 938,
-    "calib": 2062,
-    "test": 1000
+    "calib": 6920,
+    "test": 2002,
+    "tune": 3116
   },
   "dropped": {
-    "tune": 0,
     "calib": 0,
-    "test": 0
+    "test": 0,
+    "tune": 0
   },
   "routellm": true,
   "fits": {
     "fee 1.0 price 0.02/0.08": {
-      "dp_text_bins": 3,
+      "dp_text_bins": 1,
       "dp_text_bins_tune_scores": {
-        "1": 0.32321,
-        "2": 0.32506,
-        "3": 0.32849
+        "1": 0.43975,
+        "2": 0.43883,
+        "3": 0.43964
+      },
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.4441,
+        "mlp32": 0.412
+      },
+      "schedule_agreement": 0.7989241984570741
+    },
+    "fee 0.5 price 0.02/0.08": {
+      "dp_text_bins": 1,
+      "dp_text_bins_tune_scores": {
+        "1": 0.48753,
+        "2": 0.4839,
+        "3": 0.48603
       },
       "router_model": "mlp32",
       "router_scores": {
-        "logistic": 0.3103,
-        "mlp32": 0.3105
+        "logistic": 0.5089,
+        "mlp32": 0.5114
       },
-      "schedule_agreement": 0.662695853408703
-    },
-    "fee 0.5 price 0.02/0.08": {
-      "dp_text_bins": 2,
-      "dp_text_bins_tune_scores": {
-        "1": 0.3646,
-        "2": 0.36913,
-        "3": 0.36437
-      },
-      "router_model": "logistic",
-      "router_scores": {
-        "logistic": 0.4056,
-        "mlp32": 0.4041
-      },
-      "schedule_agreement": 0.6513798294029102
+      "schedule_agreement": 0.7743387978142077
     },
     "fee 2.0 price 0.02/0.08": {
-      "dp_text_bins": 3,
+      "dp_text_bins": 1,
       "dp_text_bins_tune_scores": {
-        "1": 0.3234,
-        "2": 0.31663,
-        "3": 0.32703
+        "1": 0.4597,
+        "2": 0.45747,
+        "3": 0.45593
       },
-      "router_model": "logistic",
+      "router_model": "mlp32",
       "router_scores": {
-        "logistic": 0.3468,
-        "mlp32": 0.3377
+        "logistic": 0.467,
+        "mlp32": 0.4717
       },
-      "schedule_agreement": 0.6663663363032669
+      "schedule_agreement": 0.8059987936612382
     },
     "fee 1.0 price 0/0": {
-      "dp_text_bins": 3,
+      "dp_text_bins": 1,
       "dp_text_bins_tune_scores": {
-        "1": 0.33867,
-        "2": 0.34023,
-        "3": 0.34593
+        "1": 0.473,
+        "2": 0.46933,
+        "3": 0.47143
       },
-      "router_model": "logistic",
+      "router_model": "mlp32",
       "router_scores": {
-        "logistic": 0.3742,
-        "mlp32": 0.368
+        "logistic": 0.4871,
+        "mlp32": 0.4899
       },
-      "schedule_agreement": 0.6429071511918653
+      "schedule_agreement": 0.8270951993490643
     },
     "fee 1.0 price 0.05/0.2": {
-      "dp_text_bins": 3,
+      "dp_text_bins": 1,
       "dp_text_bins_tune_scores": {
-        "1": 0.33477,
-        "2": 0.33657,
-        "3": 0.34157
+        "1": 0.47097,
+        "2": 0.4686,
+        "3": 0.47043
       },
-      "router_model": "logistic",
+      "router_model": "mlp32",
       "router_scores": {
-        "logistic": 0.3699,
-        "mlp32": 0.3605
+        "logistic": 0.4844,
+        "mlp32": 0.4874
       },
-      "schedule_agreement": 0.6524488743770407
+      "schedule_agreement": 0.794969472420811
     }
   },
-  "seconds": 565.4,
+  "seconds": 329.3,
   "ranking_check": {
     "secondary": "lenient_plus",
     "budgets_with_changes": [],
     "n_rank_changes": 0
   },
   "clarify_reference": {
-    "hindsight_oracle": 2.708,
+    "hindsight_oracle": 1.793,
+    "dp_oracle": 1.038,
+    "slack_schedule": 1.027,
+    "learned_router": 1.026,
+    "cascade_frugal": 1.01,
     "ambiguity_oracle": 1.0,
-    "learned_router": 0.915,
-    "dp_oracle": 0.846,
-    "slack_schedule": 0.84,
-    "cascade_frugal": 0.681,
-    "always_tier1": 0.591,
-    "routellm": 0.557,
-    "threshold_tuned": 0.508,
-    "random_matched": 0.507,
-    "always_tier2": 0.386,
-    "threshold_fixed": 0.236,
-    "always_tier0": 0.019,
-    "clarify_all": 0.0
+    "always_tier1": 0.941,
+    "routellm": 0.65,
+    "threshold_tuned": 0.592,
+    "always_tier2": 0.563,
+    "random_matched": 0.529,
+    "threshold_fixed": 0.141,
+    "clarify_all": 0.0,
+    "always_tier0": -0.178
   }
 }

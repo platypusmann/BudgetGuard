@@ -37,6 +37,27 @@ def test_cli_never_embeds_test(world, tmp_path):
     shutil.copytree(world / "splits", d / "splits")
     df = at.run(d, tmp_path / "out", backend="hash", n_boot=100)
     assert set(df["version"]) == {"hand", "minilm", "combined"}
-    cached = set(json.loads((d / "features" / "emb_hash_qids.json").read_text()))
+    cached = set(json.loads((d / "features" / "emb_hash_qids.json").read_text())["qids"])
     test_qids = {r["qid"] for r in iter_jsonl(d / "splits" / "test.jsonl")}
     assert cached and not (cached & test_qids)
+
+
+def test_embedding_cache_reembeds_changed_text(tmp_path):
+    import json
+
+    from budget_guard import features
+
+    d = tmp_path / "w"
+    (d / "splits").mkdir(parents=True)
+    for name, rows in (("calib", [("q1", "who wrote hamlet"), ("q2", "where is paris")]), ("tune", []), ("test", [])):
+        (d / "splits" / f"{name}.jsonl").write_text(
+            "".join(json.dumps({"qid": q, "question": t}) + "\n" for q, t in rows), encoding="utf-8")
+    features.build_embeddings(d, "hash", splits=("calib",))
+    first = features.load_embeddings(d, "hash")["q1"].copy()
+    (d / "splits" / "calib.jsonl").write_text(
+        json.dumps({"qid": "q1", "question": "who painted the mona lisa"}) + "\n"
+        + json.dumps({"qid": "q2", "question": "where is paris"}) + "\n", encoding="utf-8")
+    features.build_embeddings(d, "hash", splits=("calib",))
+    emb = features.load_embeddings(d, "hash")
+    assert not (emb["q1"] == first).all()
+    assert len(emb) == 2

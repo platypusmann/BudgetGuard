@@ -9,14 +9,22 @@ Everything goes through the real code paths:
 
 Answers are strings, not labels. grade.py decides what is correct, the same as on real data.
 
-The latent model. Each question has a difficulty z. Tier k succeeds on a clear prompt with
-probability sigmoid(a_k - z + e), with a_k solved so lenient accuracy on clear prompts lands near
-TARGET_ACC. On the raw prompt of an ambiguous question the model first picks one reading, and only
-the intended one can score, so raw accuracy on ambiguous questions is much lower. Logprob
-confidence is a noisy, overconfident view of the same skill, and it stays high when the model
-confidently answers the wrong reading, which is what makes ambiguity hard to spot from logprobs.
-Tier 0 self consistency samples scatter across readings on ambiguous questions, so they carry
-some ambiguity signal.
+The latent model, recalibrated on 2026-10-19 to the real 300-question pilot (PILOT_TARGETS):
+  skill_k = a_k - L_k * z - d_k * is_ambiguous + N_k * e_k
+z is a difficulty shared by every tier. Tier 1 and 2 load fully on it, have little noise of their
+own and share one success draw, because on the pilot they are right together on 42 percent of raw
+questions and Tier 2 is right where Tier 1 is wrong on only 6 percent. Tier 0 barely loads on z
+and has its own draw, because its confidence says nothing about the paid tiers on the pilot
+(AUROC 0.42 to 0.56). a_k is solved so clear-question accuracy hits the pilot, d_k so clarified
+ambiguous accuracy does (ambiguous questions are harder even once clarified), and on the raw
+prompt of an ambiguous question the model lands on the intended reading with probability r_k,
+the pilot's raw over clarified ratio.
+
+Confidence is a noisy, overconfident view of skill, tuned to the pilot's AUROC for each tier's
+own correctness (about 0.7). Nothing in it, and nothing in the Tier 0 self consistency samples,
+depends on ambiguity beyond the harder questions, so like on the pilot the model signals carry
+almost no ambiguity information. The question text does: template ambiguity rates are spread just
+enough that the free text detector lands near the real 0.65.
 
   python -m budget_guard.synthetic                     # writes data/synthetic
   python -m budget_guard.synthetic --n-train 600 --n-val 200 --out tests/_tmp/synth
@@ -37,10 +45,23 @@ from .common import CONFIGS, DATA, JsonlAppender, iter_jsonl, load_yaml, stable_
 from .prompts import PROMPT_VERSION, SYSTEM, user_message
 
 SYNTH_DIR = DATA / "synthetic"
-TARGET_ACC = {"tier0": 0.25, "tier1": 0.40, "tier2": 0.55}
-SKILL_NOISE = 0.6
+# real pilot, lenient accuracy on 300 calib questions (DECISIONS.md 61 and 66)
+PILOT_TARGETS = {
+    "tier0": {"clear": 0.180, "clarified": 0.109, "raw_ambiguous": 0.062},
+    "tier1": {"clear": 0.570, "clarified": 0.422, "raw_ambiguous": 0.258},
+    "tier2": {"clear": 0.645, "clarified": 0.578, "raw_ambiguous": 0.273},
+}
+LOADING = {"tier0": 0.1, "tier1": 1.0, "tier2": 1.0}      # weight on the shared difficulty z
+OWN_NOISE = {"tier0": 1.0, "tier1": 0.15, "tier2": 0.15}  # tier-specific skill noise
+SHARED_DRAW = ("tier1", "tier2")                          # one success draw and one reading draw for both
+# share of the ambiguity difficulty that confidence does NOT see. 1 means the model is exactly as
+# sure on ambiguous questions as on clear ones. Pilot: Tier 0 and 1 show no drop, Tier 2 a small one
+CONF_AMB_BLIND = {"tier0": 1.0, "tier1": 1.0, "tier2": 0.5}
 # confidence = gain * skill + bias + noise. bias > 0 means overconfident, as LLMs are
-CONF = {"tier0": (0.8, 1.0, 0.6), "tier1": (0.9, 1.0, 0.55), "tier2": (1.0, 1.0, 0.5)}
+CONF = {"tier0": (0.8, 1.0, 0.45), "tier1": (0.9, 1.0, 0.45), "tier2": (1.0, 1.0, 0.4)}
+SC_SHIFT = 2.0             # Tier 0 samples agree with probability sigmoid(conf + SC_SHIFT)
+AMB_SPREAD = 0.9           # template ambiguity rates pulled toward AMB_CENTER, text detector near 0.65
+AMB_CENTER = 0.475
 ERROR_ROW_RATE = 0.005  # api tiers only, a failed call followed by a good retry
 
 # question templates: (text, p_ambiguous, difficulty offset)
@@ -92,6 +113,10 @@ def _answer(rng) -> list[str]:
     return [main]
 
 
+def amb_rate(p_template: float) -> float:
+    return AMB_CENTER + AMB_SPREAD * (p_template - 0.5)
+
+
 def _qrng(seed: int, qid: str, tag: str):
     return np.random.default_rng([seed, stable_hash(qid, f"synth-{tag}") % (2 ** 32)])
 
@@ -108,7 +133,7 @@ def raw_rows(hf_split: str, n: int, seed: int, latent: dict) -> list[dict]:
         tmpl, p_amb, d_off = TEMPLATES[t]
         question = _fill(tmpl, rng)
         z = float(rng.normal(d_off, 1.0))
-        if rng.random() < p_amb:
+        if rng.random() < amb_rate(p_amb):
             k = int(rng.choice([2, 2, 2, 3, 3, 4]))
             qs = [f"{question} ({_name(rng, 1).lower()} reading {j + 1})" for j in range(k)]
             ans = [_answer(rng) for _ in range(k)]
@@ -128,20 +153,28 @@ def _sigmoid(x):
     return 1.0 / (1.0 + math.exp(-x))
 
 
-def solve_abilities(seed: int = 0, n: int = 40000) -> dict[str, float]:
-    """Pick a_k so mean sigmoid(a_k - z + e) hits the target on clear prompts."""
+def _bisect(f, target: float, lo: float = -8.0, hi: float = 8.0, increasing: bool = True) -> float:
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        low = f(mid) < target if increasing else f(mid) > target
+        lo, hi = (mid, hi) if low else (lo, mid)
+    return (lo + hi) / 2
+
+
+def solve_abilities(seed: int = 0, n: int = 60000) -> dict[str, tuple[float, float, float]]:
+    """Per tier (a, d, r): a hits clear accuracy, d clarified ambiguous accuracy, r the raw ratio."""
     rng = np.random.default_rng([seed, 99])
-    offs = np.array([d for _, _, d in TEMPLATES])
-    z = rng.normal(offs[rng.integers(len(TEMPLATES), size=n)], 1.0)
-    e = rng.normal(0, SKILL_NOISE, n)
+    t = rng.integers(len(TEMPLATES), size=n)
+    offs = np.array([o for _, _, o in TEMPLATES])[t]
+    amb = rng.random(n) < np.array([amb_rate(pa) for _, pa, _ in TEMPLATES])[t]
+    z = rng.normal(offs, 1.0)
     out = {}
-    for tier, target in TARGET_ACC.items():
-        lo, hi = -6.0, 6.0
-        for _ in range(60):
-            mid = (lo + hi) / 2
-            acc = np.mean(1 / (1 + np.exp(-(mid - z + e))))
-            lo, hi = (mid, hi) if acc < target else (lo, mid)
-        out[tier] = (lo + hi) / 2
+    for tier, tg in PILOT_TARGETS.items():
+        e = rng.normal(0, 1, n)
+        base = -LOADING[tier] * z + OWN_NOISE[tier] * e
+        a = _bisect(lambda x: np.mean(1 / (1 + np.exp(-(x + base[~amb])))), tg["clear"])
+        d = _bisect(lambda x: np.mean(1 / (1 + np.exp(-(a - x + base[amb])))), tg["clarified"], -4, 8, increasing=False)
+        out[tier] = (a, d, tg["raw_ambiguous"] / tg["clarified"])
     return out
 
 
@@ -203,11 +236,13 @@ def simulate_answer(row: dict, variant: str, tier: str, abilities: dict, latent:
     """Decide what tier says for one prompt. Shared randomness ties orig and clar together."""
     qid = row["qid"]
     lat = latent[qid]
+    a, d, r = abilities[tier]
     rq = _qrng(seed, qid, tier)                       # same draws for orig and clar of this tier
-    skill = abilities[tier] - lat["z"] + rq.normal(0, SKILL_NOISE)
-    u_success = rq.random()
+    skill = a - LOADING[tier] * lat["z"] - d * row["is_ambiguous"] + OWN_NOISE[tier] * rq.normal()
+    u_success = _qrng(seed, qid, "shared").random() if tier in SHARED_DRAW else rq.random()
     gain, bias, noise = CONF[tier]
-    conf = gain * skill + bias + rq.normal(0, noise)
+    seen = skill + CONF_AMB_BLIND[tier] * d * row["is_ambiguous"]
+    conf = gain * seen + bias + rq.normal(0, noise)
     rv = _qrng(seed, f"{qid}::{variant}", tier)       # per prompt draws for wording
     gold = row["gold"]
     avoid = {g.lower() for g in gold}
@@ -216,12 +251,10 @@ def simulate_answer(row: dict, variant: str, tier: str, abilities: dict, latent:
     reading_ok = True
     other_answers: list[str] = []
     if row["is_ambiguous"]:
-        others = [it["answers"][0] for j, it in enumerate(row["interpretations"]) if j != row["intended_index"]]
-        other_answers = others
+        other_answers = [it["answers"][0] for j, it in enumerate(row["interpretations"]) if j != row["intended_index"]]
         if variant == "orig":
-            n = row["n_interpretations"]
-            reading_ok = rv.random() < 1.0 / n
-            conf += rv.normal(-0.2, 0.3)              # slightly less sure, but not much
+            u_read = _qrng(seed, qid, "reading").random() if tier in SHARED_DRAW else rv.random()
+            reading_ok = u_read < r
 
     if knows and reading_ok:
         answer = _render_correct(str(rv.choice(gold)), rv)
@@ -255,15 +288,12 @@ def tier0_row(cfg: dict, prompt: dict, sim: dict) -> dict:
     feats = cache_api.logprob_features(content)
     n_in, n_out = _n_in(prompt["text"], "tier0"), min(len(content), cfg["max_new_tokens"])
     samples = []
-    agree_p = _sigmoid(sim["conf"] - 0.3)
-    if sim["other_answers"] and prompt["variant"] == "orig":
-        agree_p *= 0.55                               # samples split across readings
+    # no ambiguity term: on the pilot self consistency carried no ambiguity signal (AUROC 0.52)
+    agree_p = _sigmoid(sim["conf"] + SC_SHIFT)
     for _ in range(cfg["n_samples"]):
         u = rv.random()
         if u < agree_p:
             samples.append(answer)
-        elif sim["other_answers"] and prompt["variant"] == "orig" and rv.random() < 0.6:
-            samples.append(str(rv.choice(sim["other_answers"])))
         else:
             samples.append(_distractor(rv, sim["avoid"]))
     norm = _nb_normalize(answer)
@@ -282,7 +312,7 @@ def tier0_row(cfg: dict, prompt: dict, sim: dict) -> dict:
 
 # ---------------------------------------------------------------- build
 
-def build_world(out_dir: Path = SYNTH_DIR, n_train: int = 3000, n_val: int = 1000, seed: int = 0,
+def build_world(out_dir: Path = SYNTH_DIR, n_train: int = 10036, n_val: int = 2002, seed: int = 0,
                 pilot_n: int = split.PILOT_N, tiers: tuple[str, ...] = ("tier0", "tier1", "tier2")) -> dict:
     out_dir = Path(out_dir)
     splits_dir, cache_dir = out_dir / "splits", out_dir / "cache"
@@ -322,7 +352,8 @@ def build_world(out_dir: Path = SYNTH_DIR, n_train: int = 3000, n_val: int = 100
         counts[tier] = n
 
     info = {"synthetic": True, "seed": seed, "n_train": n_train, "n_val": n_val,
-            "abilities": abilities, "target_acc": TARGET_ACC, "rows": counts,
+            "abilities": {k: {"a": v[0], "d": v[1], "r": v[2]} for k, v in abilities.items()},
+            "pilot_targets": PILOT_TARGETS, "rows": counts,
             "split_stats": manifest["stats"]}
     (out_dir / "SYNTHETIC").write_text(json.dumps(info, indent=2))
     return info
@@ -337,8 +368,8 @@ def is_synthetic(data_dir: Path) -> bool:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=SYNTH_DIR)
-    ap.add_argument("--n-train", type=int, default=3000)
-    ap.add_argument("--n-val", type=int, default=1000)
+    ap.add_argument("--n-train", type=int, default=10036)   # AmbigNQ light train size
+    ap.add_argument("--n-val", type=int, default=2002)      # AmbigNQ light validation size
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--pilot-n", type=int, default=split.PILOT_N)
     args = ap.parse_args(argv)

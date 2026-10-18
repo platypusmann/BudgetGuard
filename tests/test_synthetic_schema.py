@@ -45,20 +45,24 @@ def test_error_rows_are_followed_by_good_ones(world):
     assert seen_err <= good
 
 
-def test_accuracies_roughly_realistic(world):
+def test_accuracies_match_the_real_pilot(world):
+    """The generator is calibrated to the real pilot. A 600-question world is noisy, so loose bounds."""
     import pandas as pd
 
     from budget_guard.common import iter_jsonl as it
+    from budget_guard.synthetic import PILOT_TARGETS
 
     amb = {r["qid"]: r["is_ambiguous"] for s in ("calib", "tune", "test") for r in it(world / "splits" / f"{s}.jsonl")}
-    targets = {"tier0": 0.25, "tier1": 0.40, "tier2": 0.55}
-    for tier, target in targets.items():
+    for tier, tg in PILOT_TARGETS.items():
         g = pd.read_parquet(world / "graded" / f"{tier}.parquet")
         g["amb"] = g["qid"].map(amb)
-        clear = g[(g["variant"] == "clar") | ~g["amb"]]["lenient"].mean()
+        clear = g[(g["variant"] == "orig") & ~g["amb"]]["lenient"].mean()
         raw_amb = g[(g["variant"] == "orig") & g["amb"]]["lenient"].mean()
-        assert abs(clear - target) < 0.08, (tier, clear)
-        assert raw_amb < clear - 0.1, (tier, raw_amb, clear)
+        clar = g[g["variant"] == "clar"]["lenient"].mean()
+        assert abs(clear - tg["clear"]) < 0.08, (tier, clear)
+        assert abs(clar - tg["clarified"]) < 0.08, (tier, clar)
+        assert abs(raw_amb - tg["raw_ambiguous"]) < 0.08, (tier, raw_amb)
+        assert raw_amb < clar, tier
 
 
 def test_splits_fixture_is_real_format(world):

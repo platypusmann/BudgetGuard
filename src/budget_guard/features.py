@@ -164,29 +164,51 @@ def _embed_minilm(texts: list[str], batch: int = 64) -> np.ndarray:
     return np.vstack(chunks)
 
 
+def _text_key(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_index(idx: Path) -> tuple[list[str], list[str | None]]:
+    """qids and text fingerprints of the cached vectors. Old caches stored the qid list only."""
+    raw = json.loads(idx.read_text())
+    if isinstance(raw, list):
+        return raw, [None] * len(raw)
+    return raw["qids"], raw["text_sha1"]
+
+
 def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple[str, ...] = ALL_SPLITS) -> Path:
     """Embed the questions of `splits` and add them to the on-disk cache.
 
     Incremental: only questions not already cached are embedded, so a calib and tune run now and
     a test run at final evaluation share one cache, and test is never embedded before it is needed.
+    Each vector is keyed by qid and a fingerprint of the question text, so a question whose text
+    changed (a rebuilt synthetic world reuses qids) is embedded again, never served stale.
     """
     data_dir = Path(data_dir)
     qids, texts = _questions(data_dir, splits)
     out = data_dir / "features" / f"emb_{backend}.npy"
     idx = data_dir / "features" / f"emb_{backend}_qids.json"
-    have_qids: list[str] = json.loads(idx.read_text()) if out.exists() and idx.exists() else []
-    have = set(have_qids)
-    todo = [(q, t) for q, t in zip(qids, texts) if q not in have]
+    have_q, have_k = _read_index(idx) if out.exists() and idx.exists() else ([], [])
+    keys = [_text_key(t) for t in texts]
+    have = {q: (k, i) for i, (q, k) in enumerate(zip(have_q, have_k))}
+    todo = [(q, t, k) for q, t, k in zip(qids, texts, keys) if q not in have or have[q][0] != k]
     if not todo:
         print(f"embeddings: {out} already has all {len(qids)} questions of {', '.join(splits)}")
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    new_texts = [t for _, t in todo]
-    new = _embed_minilm(new_texts) if backend == "minilm" else _embed_hash(new_texts)
-    emb = np.vstack([np.load(out), new]) if have_qids else new
+    stale = {q for q, _, _ in todo if q in have}
+    keep = [i for i, q in enumerate(have_q) if q not in stale and have_k[i] is not None]
+    old = np.load(out)[keep] if keep else np.zeros((0, 0), "float32")
+    new = _embed_minilm([t for _, t, _ in todo]) if backend == "minilm" else _embed_hash([t for _, t, _ in todo])
+    emb = np.vstack([old, new]) if len(keep) else new
+    q_all = [have_q[i] for i in keep] + [q for q, _, _ in todo]
+    k_all = [have_k[i] for i in keep] + [k for _, _, k in todo]
     np.save(out, emb)
-    idx.write_text(json.dumps(have_qids + [q for q, _ in todo]))
-    print(f"embeddings: added {len(todo)} {backend} vectors, {emb.shape[0]} cached -> {out}")
+    idx.write_text(json.dumps({"qids": q_all, "text_sha1": k_all}))
+    print(f"embeddings: embedded {len(todo)} {backend} questions ({len(stale)} with changed text), "
+          f"{emb.shape[0]} cached -> {out}")
     return out
 
 
@@ -198,7 +220,7 @@ def load_embeddings(data_dir: Path = DATA, backend: str = "hash") -> dict[str, n
         if backend != "hash":
             raise FileNotFoundError(f"{out} missing. Run python -m budget_guard.features --embed {backend}")
         build_embeddings(data_dir, "hash")
-    qids = json.loads((data_dir / "features" / f"emb_{backend}_qids.json").read_text())
+    qids, _ = _read_index(data_dir / "features" / f"emb_{backend}_qids.json")
     emb = np.load(out)
     return {q: emb[i] for i, q in enumerate(qids)}
 
@@ -207,7 +229,15 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=DATA)
     ap.add_argument("--embed", choices=["none", "hash", "minilm"], default="hash")
+    ap.add_argument("--include-test", action="store_true",
+                    help="required on real data: the table and embeddings cover the test split, "
+                         "so this belongs to the final evaluation step only")
     args = ap.parse_args(argv)
+    from .synthetic import is_synthetic
+
+    if not is_synthetic(args.data_dir) and not args.include_test:
+        raise SystemExit("features on real data reads the test split, which only the final evaluation may do. "
+                         "Use python scripts/bg.py real, or pass --include-test at that step.")
     build_features(args.data_dir)
     if args.embed != "none":
         build_embeddings(args.data_dir, args.embed)

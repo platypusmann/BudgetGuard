@@ -44,33 +44,33 @@ Everything is fitted on calib, tuned on tune, and the test split is only read in
 
 ![Cost versus accuracy, synthetic](results/figures/headline_cost_vs_accuracy.png)
 
-Accuracy (lenient match, pre-registered) on the test split, 300 episodes of 100 questions over three stream seeds, clarify fee equal to one mean Tier 2 call, Tier 0 at 0.02/0.08. Budget is per question in u2, the mean Tier 2 call cost (about $0.00015). Brackets are bootstrap 95 percent CIs over episodes. Violation rate is 0 in every row.
+The synthetic world is calibrated to the real 300-question pilot: per-tier accuracy on clear, raw ambiguous and clarified questions, confidence AUROC around 0.7, ambiguity invisible to model signals, and a text detector near 0.65. Accuracy (lenient match, pre-registered) on the synthetic test split, 300 episodes of 100 questions over three stream seeds, clarify fee equal to one mean Tier 2 call, Tier 0 at 0.02/0.08. Budget is per question in u2, the mean Tier 2 call cost. Brackets are bootstrap 95 percent CIs over episodes. Violation rate is 0 in every row. Experiment design sha256 637c0563...27e5 (frozen).
 
 | Policy | budget 0.02 u2 | budget 0.35 u2 | budget 1 u2 |
 |---|---|---|---|
-| Always Tier 0 | 0.178 (0.173 to 0.182) | 0.178 (0.173 to 0.182) | 0.178 (0.173 to 0.182) |
-| Always Tier 1 | 0.118 (0.115 to 0.121) | 0.283 (0.278 to 0.287) | 0.283 (0.278 to 0.287) |
-| Always Tier 2 | 0.118 (0.115 to 0.121) | 0.245 (0.240 to 0.249) | 0.380 (0.376 to 0.385) |
-| Random, matched spend | 0.187 (0.183 to 0.191) | 0.267 (0.263 to 0.272) | 0.390 (0.385 to 0.395) |
-| Fixed threshold (ReDAct) | 0.101 (0.097 to 0.104) | 0.218 (0.213 to 0.222) | 0.222 (0.217 to 0.227) |
-| Threshold tuned per budget | 0.184 (0.180 to 0.188) | 0.267 (0.263 to 0.272) | 0.428 (0.423 to 0.432) |
-| FrugalGPT cascade | 0.185 (0.181 to 0.190) | 0.299 (0.295 to 0.304) | 0.438 (0.432 to 0.443) |
-| RouteLLM-style | 0.206 (0.201 to 0.210) | 0.277 (0.272 to 0.281) | 0.404 (0.399 to 0.409) |
-| Slack schedule | 0.196 (0.192 to 0.200) | 0.328 (0.324 to 0.333) | 0.435 (0.430 to 0.440) |
-| Learned router | 0.202 (0.197 to 0.206) | 0.342 (0.337 to 0.347) | 0.439 (0.434 to 0.444) |
-| DP oracle | 0.202 (0.198 to 0.206) | 0.330 (0.325 to 0.334) | 0.433 (0.427 to 0.438) |
-| Clarify every question (blind) | 0.005 (0.004 to 0.005) | 0.174 (0.171 to 0.177) | 0.392 (0.387 to 0.397) |
-| Ambiguity oracle (clarify iff ambiguous) | 0.183 (0.179 to 0.187) | 0.358 (0.353 to 0.363) | 0.485 (0.480 to 0.489) |
-| Hindsight oracle | 0.374 (0.369 to 0.378) | 0.672 (0.668 to 0.676) | 0.729 (0.725 to 0.734) |
+| Always Tier 0 | 0.129 (0.125 to 0.133) | 0.129 (0.125 to 0.133) | 0.129 (0.125 to 0.133) |
+| Always Tier 1 | 0.179 (0.176 to 0.182) | 0.445 (0.439 to 0.451) | 0.445 (0.439 to 0.451) |
+| Always Tier 2 | 0.179 (0.176 to 0.182) | 0.338 (0.333 to 0.344) | 0.500 (0.494 to 0.505) |
+| Random, matched spend | 0.178 (0.174 to 0.182) | 0.329 (0.323 to 0.334) | 0.512 (0.506 to 0.518) |
+| Fixed threshold (ReDAct) | 0.097 (0.094 to 0.100) | 0.219 (0.215 to 0.224) | 0.223 (0.219 to 0.228) |
+| Threshold tuned per budget | 0.189 (0.185 to 0.193) | 0.346 (0.341 to 0.352) | 0.514 (0.508 to 0.520) |
+| FrugalGPT cascade | 0.189 (0.185 to 0.193) | 0.464 (0.458 to 0.470) | 0.528 (0.523 to 0.534) |
+| RouteLLM-style | 0.208 (0.205 to 0.212) | 0.363 (0.357 to 0.368) | 0.521 (0.515 to 0.526) |
+| Slack schedule | 0.197 (0.192 to 0.201) | 0.469 (0.463 to 0.475) | 0.531 (0.525 to 0.536) |
+| Learned router | 0.189 (0.185 to 0.193) | 0.469 (0.463 to 0.474) | 0.531 (0.526 to 0.537) |
+| DP oracle | 0.198 (0.194 to 0.202) | 0.472 (0.466 to 0.478) | 0.535 (0.530 to 0.541) |
+| Clarify every question (blind) | 0.006 (0.006 to 0.007) | 0.179 (0.176 to 0.183) | 0.491 (0.486 to 0.497) |
+| Ambiguity oracle (clarify iff ambiguous) | 0.239 (0.235 to 0.243) | 0.461 (0.455 to 0.467) | 0.587 (0.581 to 0.592) |
+| Hindsight oracle | 0.482 (0.478 to 0.486) | 0.685 (0.679 to 0.690) | 0.685 (0.679 to 0.691) |
 
 What the synthetic run says, for what it's worth before real data:
 
-- The toy's story holds. The fixed threshold fails in both directions. At tight budgets it spends early and runs dry (0.101, worse than always Tier 0). At loose budgets it can't use the money (stuck at 0.222).
-- Budget-aware policies win in the middle of the range. At 0.35 u2 the DP beats the threshold tuned for that exact budget by 6.2 points (paired 95 percent CI 5.7 to 6.7) and the fixed threshold by 11.2 points (10.6 to 11.8).
-- Averaged over the 8 budgets, the learned router closes 102 percent of the gap between the fixed threshold and the DP (it edges the DP), the slack schedule 98 percent, the cascade 91 and the tuned threshold 61. That ordering is close to the toy's (tuned threshold 61, schedule 93).
-- The guard matters. Run without masking, the fixed and tuned thresholds go over the cap in 100 percent of episodes at budgets up to 0.2 u2, with p95 spend up to 24 times the budget.
-- Clarify is used with good precision but modest recall. The DP clarifies 13 percent of questions at 0.35 u2, and 81 percent of those really are ambiguous, but it only catches 23 percent of the ambiguous ones, because the fee competes with Tier 2 calls.
-- Knowing ambiguity exactly is worth a few points. The ambiguity oracle beats the DP by 2.8 points at 0.35 u2 and 5.2 at 1 u2. On a scale where blind clarify-all is 0 and the oracle is 1, the DP sits at 0.85 and the learned router at 0.92 at 0.35 u2 (`results/clarify_reference.csv`).
+- Against a fair baseline, budget-awareness buys about a point. The strongest simple policy that can use Tier 1 (always Tier 1 at tight budgets, the FrugalGPT cascade from 0.35 u2 up) is within 1 point of the DP at every budget: the DP is 0.8 points ahead at 0.35 u2 and 0.7 at 1 u2. The learned router and the slack schedule track the DP within about a point. This is the honest headline for now.
+- Against the ReDAct-style thresholds the gap looks huge (the DP beats the tuned threshold by 12.6 points at 0.35 u2, paired CI 12.1 to 13.1), but most of that is not budget-awareness. The threshold rules are two-model (Tier 0 or Tier 2), and on the pilot Tier 1 is nearly as good as Tier 2 at a twentieth of the price while Tier 0 is weak. Plain always Tier 1 beats the tuned threshold at every budget below 0.75 u2.
+- The toy's failure modes still show. The fixed threshold runs dry at tight budgets (0.097 at 0.02 u2, below always Tier 0's 0.129) and can't use money at loose ones (stuck at 0.223).
+- The guard matters. Run without masking, the fixed and tuned thresholds go over the cap in 100 percent of episodes at budgets up to 0.2 u2, with p95 spend up to 23 times the budget.
+- Clarifying is hard to aim. With ambiguity nearly invisible to the model signals, the DP clarifies 15 percent of questions at 0.35 u2 with 56 percent precision and 19 percent recall. Clarifying exactly the ambiguous questions is worth 5 points over the DP at 1 u2, but it is worse than the DP at middle budgets, where forcing a clarify on every ambiguous question costs more than it returns.
+- The free text ambiguity score doesn't earn its place in the DP here. Under the frozen rule (more text bins only if they win by 0.5 points on tune) every config kept a single bin.
 
 Other figures in `results/figures`: accuracy by budget, violations and p95 spend without the guard, the clarify fee and Tier 0 price sweeps, and Tier 2 use by remaining slack. Full numbers are in `results/summary.csv` and `results/paired.csv`.
 
@@ -127,11 +127,11 @@ research/poc/               the SIT320 proposal, comparison note and toy noteboo
 
 ## Limitations
 
-- These numbers are synthetic. The generator is tuned to land near realistic accuracies (about 25, 40 and 55 percent on clear prompts) and realistic signal quality (AUROC about 0.73 for Tier 0 confidence), but the shape of the results depends on modelling choices I made, such as difficulty shared across tiers. Treat it as a test that the machinery works and a forecast to check, not a finding.
+- These numbers are synthetic. The generator is calibrated to the real pilot (accuracy per tier and question type, confidence AUROC, how often Tier 1 and Tier 2 agree, and how invisible ambiguity is), so it is a realistic rehearsal, but its structure is still my modelling choice. Treat it as a test that the machinery works and a forecast to check, not a finding.
 - This is a reframing of the SIT320 formulation, not the formulation itself. The proposal is about multi-step tool-using agents, where one failed step ends the task, the reward is a product over steps, and clarifying helps every remaining step. Here each question is single-turn, the reward is the number correct over a stream (additive), and a clarification only helps the question it was asked on. The remaining budget plays the same role in the state, and the DP, the monotonicity lemma and the hard cap carry over, but the dependence between steps, which is what made the toy interesting, is gone. Irreversible actions and the post-hoc abstention failure mode aren't tested at all.
 - That reframing puts this close to TREACLE, which also learns a budget-constrained policy over a stream of independent questions with remaining budget in the state. The differences are the clarify action priced against escalation, the hard per-episode cap enforced by worst-case masking rather than an average, and the exact DP and slack-schedule baselines from the proposal. That's a modest step from TREACLE, not a new problem. The multi-step agent setting from the proposal is still the open part.
-- Detecting ambiguity is the weak link on real data. On the 300-question pilot, Tier 0 self consistency and cross-tier agreement carry no ambiguity signal (AUROC about 0.5), and the free text detector reaches 0.65 on real tune. The synthetic world assumed more (0.81 for the Tier 0 belief), so expect the clarify gains above to shrink on real data.
-- The DP is exact for its own model (Tier 0 signal in 24 bins, mean costs), not for the world. The cascade, which also sees Tier 1's confidence, ties or slightly beats it at the two loosest budgets, and the learned router matches or slightly beats it at most budgets.
+- Detecting ambiguity is the weak link on real data. On the 300-question pilot, Tier 0 self consistency and cross-tier agreement carry no ambiguity signal (AUROC about 0.5), and the free text detector reaches 0.65 on real tune. An optional paid probe (Tier 1 asked whether the question is ambiguous) is wired up for the pilot only, with a keep rule set before it runs.
+- The DP is exact for its own model (Tier 0 signal in 24 bins, mean costs), not for the world. Because Tier 0 says almost nothing about the paid tiers, the DP's information is thin, which is why the FrugalGPT cascade (which sees Tier 1's confidence) and plain always Tier 1 come within about a point of it.
 - The learned router is behaviour cloning only. The PPO-Lagrangian fine-tune from the proposal isn't implemented, and with masking already enforcing the cap it would only change how well the router spends, not whether it obeys the cap.
 - Clarification is simulated as a perfect user. The answer to a clarifying question is always the hash-chosen intended reading, at a fixed fee. Real users are slower, sometimes vague, and the fee is a modelling choice, which is why it's swept.
 - Unlike the toy, the hard-cap DP doesn't sit below a soft frontier here. The soft frontier is the two-tier fixed threshold with no cap, which is a weaker rule than the three-tier DP, so the toy's "price of the guarantee" can't be read off this figure. A fair version would need an uncapped DP, which isn't built yet.
