@@ -148,7 +148,16 @@ Every choice I made while building this out, with the reason. Newest sections go
 
 62. evaluate must report the headline under both metrics and flag any policy whose ranking differs between them. The same decisions are rescored under lenient_plus, without refitting, so any change comes from the grader alone.
 
-63. My own hand count, to fill in: Tier 0 __ of 30, Tier 1 __ of 30, Tier 2 __ of 30.
+63. Hand count, 2026-10-19, Ranveer. 30 pilot rows per tier, judged against the gold answers only, not real-world truth.
+Agreement with the automated lenient grader: Tier 0 30/30, Tier 1 26/30, Tier 2 27/30
+Grader said wrong, I say right: Tier 0 0, Tier 1 4, Tier 2 3
+Grader said right, I say wrong: 0 on all tiers
+Disagreement rows: Tier 1 #5 (date order), #17 (Fifth vs 5th), #26 (same four majors reworded), #30 (78th vs 78). Tier 2 #5 (78th vs 78), #13 (plasma membrane vs cell membrane), #20 (paraphrase).
+Conventions: partial answers counted as wrong (Tier 0 #4, Tier 1 #8, Tier 2 #8). Answers that are right in the real world but differ from the gold counted as wrong. Examples are Tier 1 #1, #6, #9, #16, #18, #23 and Tier 2 #16, #19. These are gold noise or the ambiguity penalty, not grader errors.
+Borderline calls were settled with Claude's input.
+Compared with Claude Code's read of about 26/30 per tier: Tier 1 matches, Tier 2 is one better, Tier 0 is clean.
+Bar of 27/30: met for Tier 0 and Tier 2, missed by one for Tier 1.
+Outcome: primary metric unchanged, lenient_plus stays secondary, evaluate reports both. Date order and the two 78th rows should be caught by lenient_plus. The rest are out of its scope by design.
 
 64. Fixed a bug found while running the pilot check. The synthetic marker test was `(data_dir / "SYNTHETIC").exists()`, and Windows paths ignore case, so `data/SYNTHETIC` matched the `data/synthetic/` folder. The real evaluation would have stamped its CSVs and figures SYNTHETIC. It now requires the marker to be a file, and a test covers it.
 

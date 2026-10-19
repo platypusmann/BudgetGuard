@@ -18,7 +18,7 @@ Always go through `python scripts/bg.py`, which puts `src` on the Python path. C
 
 ## B. Before the full run (free, except the optional probe)
 
-- [ ] Write your own hand count into DECISIONS.md entry 63 (Tier 0, 1 and 2, out of 30 each). `python scripts/hand_check.py --n 30` prints the rows again.
+- [x] Write your own hand count into DECISIONS.md entry 63 (Tier 0, 1 and 2, out of 30 each). `python scripts/hand_check.py --n 30` prints the rows again.
 
 - [ ] Run the tests. Everything should pass, including the check that the experiment design still matches its lock.
   ```
