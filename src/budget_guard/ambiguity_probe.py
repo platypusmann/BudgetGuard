@@ -27,7 +27,7 @@ import numpy as np
 
 PROBE_VERSION = "amb-v1"
 TASK = "ambiguity"
-MAX_OUT = 2  # "Yes" or "No" is one token, one spare
+MAX_OUT = 16  # the reply is one word, but the API rejected max_completion_tokens=2 with a 400 on the first run
 KEEP_AUROC, KEEP_CI_LO = 0.72, 0.65
 
 SYSTEM = (

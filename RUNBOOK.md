@@ -32,7 +32,7 @@ Always go through `python scripts/bg.py`, which puts `src` on the Python path. C
   python scripts/bg.py cache sync --task ambiguity --tier tier1 --pilot --cap 0.01
   python scripts/bg.py probe-compare
   ```
-  The estimate should say 300 prompts and about $0.003 worst case. `probe-compare` prints KEEP or DROP (keep only if AUROC is at least 0.72 and the CI's lower end is above 0.65, against the free text detector on the same questions). Write the result into DECISIONS.md either way. A KEEP doesn't change the full run below, because using the probe in the router would be a design change, which needs its own decision first.
+  The estimate should say 300 prompts and about $0.0055 worst case. `probe-compare` prints KEEP or DROP (keep only if AUROC is at least 0.72 and the CI's lower end is above 0.65, against the free text detector on the same questions). Write the result into DECISIONS.md either way. A KEEP doesn't change the full run below, because using the probe in the router would be a design change, which needs its own decision first.
 
 ## C. Full Tier 0 run on Kaggle (free, a few GPU hours)
 
