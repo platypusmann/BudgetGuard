@@ -41,6 +41,14 @@ def test_evaluate_refuses_unfrozen_design_on_real_data(world, tmp_path):
         evaluate.main(["--data-dir", str(real), "--out", str(tmp_path / "o"), "--config", str(other)])
 
 
+def test_git_state_reads_the_repo():
+    from budget_guard import provenance
+
+    st = provenance.git_state()
+    assert len(st["commit"]) == 40 and st["dirty_code"] in (True, False)
+    assert "code commit" in provenance.describe(st)
+
+
 def test_every_output_carries_the_hash(world, tmp_path):
     import json
 
@@ -52,4 +60,9 @@ def test_every_output_carries_the_hash(world, tmp_path):
     for name in ("summary", "paired", "soft_frontier", "metric_ranking", "clarify_reference", "schedule"):
         col = pd.read_csv(out / f"{name}.csv")["design_sha256"]
         assert (col == h + "+quick").all(), name
-    assert json.loads((out / "run_info.json").read_text())["design_sha256"] == h + "+quick"
+    info = json.loads((out / "run_info.json").read_text())
+    assert info["design_sha256"] == h + "+quick"
+    assert len(info["code"]["commit"]) == 40
+    from budget_guard.report import write_table
+
+    assert info["code"]["commit"] in write_table(out).read_text(encoding="utf-8")

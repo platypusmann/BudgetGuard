@@ -82,6 +82,13 @@ def test_dry_run_evaluate_never_decodes_test(copy, tmp_path, decode_spy):
     info = json.loads((out / "run_info.json").read_text())
     assert info["mode"].startswith("dry run") and info["eval_split"] == "tune"
     assert set(info["pool_sizes"]) == {"calib", "tune"}
+    from budget_guard.dry_run_report import report
+
+    text = report(out)
+    assert "Masked policies all at 0: yes" in text and "Result: COMPLETE" in text
+    from budget_guard.report import write_table
+
+    assert "DRY RUN" in write_table(out).read_text(encoding="utf-8")
 
 
 def test_final_path_still_covers_test(world):

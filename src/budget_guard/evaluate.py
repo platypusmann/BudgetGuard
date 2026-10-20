@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import completeness, design, devdata
+from . import completeness, design, devdata, provenance
 from . import episodes as ep
 from .common import DATA, ROOT
 from .features import load_embeddings, load_features
@@ -260,6 +260,8 @@ def main(argv=None) -> None:
     synthetic = is_synthetic(args.data_dir)
     design_sha, frozen = design.check(args.config or design.DESIGN)
     stamp = design_sha + ("+quick" if args.quick else "") + ("" if frozen else "+unfrozen")
+    code = provenance.git_state()
+    print(provenance.describe(code))
     print(f"experiment design sha256 {design_sha}: "
           + ("frozen design" if frozen and not args.quick else
              "NOT the frozen design" + (" (--quick overrides)" if args.quick else "")))
@@ -323,10 +325,11 @@ def main(argv=None) -> None:
         df.insert(0, "data", tag)
         df.insert(1, "design_sha256", stamp)
         df.to_csv(args.out / f"{name}.csv", index=False)
-    info = {"data": tag, "mode": "dry run on tune, debugging only" if dev else "final", "design_sha256": stamp, "design_frozen": frozen and not args.quick,
+    info = {"data": tag, "code": code, "mode": "dry run on tune, debugging only" if dev else "final", "design_sha256": stamp, "design_frozen": frozen and not args.quick,
             "cache_completeness": cache_report, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
             "config": cfg, "signal_auc_eval": sm.auc_report(envs[args.eval_split]),
             "pool_sizes": {s: e.n for s, e in envs.items()},
+            "eval_ambiguous_rate": float(envs[args.eval_split].is_amb.mean()),
             "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
             "fits": extras, "seconds": round(time.time() - t_start, 1)}
     other = SECONDARY.get(metric)

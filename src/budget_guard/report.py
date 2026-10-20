@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -49,11 +50,21 @@ def _style(ax, title, xlabel, ylabel):
     ax.tick_params(colors=INK2, labelsize=8)
 
 
+STAMPS = {"SYNTHETIC": "SYNTHETIC DATA, not real model results",
+          "DRY RUN": "DRY RUN on tune, debugging only, not results"}
+
+
+def _tag(s) -> str:
+    """DRY RUN for any run evaluated on tune (real or synthetic), else SYNTHETIC or REAL."""
+    if (s["eval_split"] == "tune").all():
+        return "DRY RUN"
+    return "SYNTHETIC" if s["data"].iloc[0] == "SYNTHETIC" else "REAL"
+
+
 def _stamp(fig, tag, bottom: float = 0.0):
-    """Mark synthetic figures in the top right corner, then lay out around it."""
-    if tag == "SYNTHETIC":
-        fig.text(0.99, 0.995, "SYNTHETIC DATA, not real model results", ha="right", va="top",
-                 fontsize=9, color="#e34948", weight="bold")
+    """Mark synthetic and dry-run figures in the top right corner, then lay out around it."""
+    if tag in STAMPS:
+        fig.text(0.99, 0.995, STAMPS[tag], ha="right", va="top", fontsize=9, color="#e34948", weight="bold")
     fig.tight_layout(rect=(0, bottom, 1, 0.95))
 
 
@@ -80,7 +91,7 @@ def make_figures(out: Path) -> list[Path]:
     figs = out / "figures"
     figs.mkdir(parents=True, exist_ok=True)
     s = pd.read_csv(out / "summary.csv")
-    tag = s["data"].iloc[0]
+    tag = _tag(s)
     head = s[s["headline"] & s["masked"]]
     soft = pd.read_csv(out / "soft_frontier.csv") if (out / "soft_frontier.csv").exists() else None
     if soft is not None and len(soft) == 0:
@@ -221,7 +232,7 @@ def write_table(out: Path, metric: str | None = None) -> Path:
     import pandas as pd
 
     s = pd.read_csv(Path(out) / "summary.csv")
-    tag = s["data"].iloc[0]
+    tag = _tag(s)
     head = s[s["headline"] & s["masked"]].copy()
     label = head["metric"].iloc[0]
     if metric is not None:
@@ -232,8 +243,13 @@ def write_table(out: Path, metric: str | None = None) -> Path:
     bs = sorted(head["budget_u2_per_q"].unique())
     pick = [bs[0], bs[len(bs) // 2], bs[-1]] if len(bs) >= 3 else bs
     sha = head["design_sha256"].iloc[0] if "design_sha256" in head else "unknown"
-    lines = [f"Experiment design sha256 {sha}.", "",
-             f"Accuracy ({label}) with bootstrap 95 percent CI, {tag} data, "
+    info_path = Path(out) / "run_info.json"
+    code = json.loads(info_path.read_text()).get("code") if info_path.exists() else None
+    lines = (["DRY RUN on the tune split: debugging numbers, not results. Keep out of the README.", ""]
+             if tag == "DRY RUN" else [])
+    commit = f" Code commit {code['commit']}{' (' + code['tag'] + ')' if code.get('tag') else ''}." if code else ""
+    lines += [f"Experiment design sha256 {sha}.{commit}", "",
+             f"Accuracy ({label}) with bootstrap 95 percent CI, {s['data'].iloc[0]} data, "
              f"{head['eval_split'].iloc[0]} split, {int(head['n_episodes'].iloc[0])} episodes of "
              f"{int(head['K'].iloc[0])} questions, clarify fee 1x u2, Tier 0 at 0.02/0.08. "
              "Budget is per question in u2, the mean Tier 2 call cost. Violation rate is 0 for every row.", "",
