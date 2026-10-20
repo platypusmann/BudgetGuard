@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from budget_guard.common import DATA, iter_jsonl  # noqa: E402
+from budget_guard.common import DATA, iter_jsonl, iter_jsonl_where, only_splits  # noqa: E402
 from budget_guard.grade import TIERS, latest_good_rows, load_graded  # noqa: E402
 
 
@@ -29,8 +29,10 @@ def main() -> None:
 
     pd.set_option("display.width", 220)
     pd.set_option("display.max_colwidth", 60)
-    rows = {r["qid"]: r for s in ("calib", "tune", "test") for r in iter_jsonl(args.data_dir / "splits" / f"{s}.jsonl")}
-    pilot = {p["pid"]: p["text"] for p in iter_jsonl(args.data_dir / "splits" / "prompts.jsonl") if p["pilot"]}
+    # the pilot is drawn from calib, so nothing else is read, and other splits' prompts are never decoded
+    rows = {r["qid"]: r for r in iter_jsonl(args.data_dir / "splits" / "calib.jsonl")}
+    pilot = {p["pid"]: p["text"] for p in iter_jsonl_where(args.data_dir / "splits" / "prompts.jsonl", only_splits(["calib"]))
+             if p["pilot"]}
     for tier in TIERS:
         cache = args.data_dir / "cache" / f"{tier}.jsonl"
         if not cache.exists():
@@ -38,7 +40,8 @@ def main() -> None:
             continue
         raw = pd.DataFrame([{k: r.get(k) for k in ("pid", "answer", "finish_reason", "lp_mean", "model_returned",
                                                     "prompt_version", "usd")}
-                            for r in latest_good_rows(cache) if r["pid"] in pilot])
+                            for r in latest_good_rows(cache, {p.split("::")[0] for p in pilot})
+                            if r["pid"] in pilot])
         if raw.empty:
             print(f"{tier}: no pilot rows")
             continue

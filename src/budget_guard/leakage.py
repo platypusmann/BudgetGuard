@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Iterable
 
 from . import split
-from .common import iter_jsonl
+from .common import read_qids
 
 
 def verify_and_test_qids(splits_dir: Path) -> frozenset[str]:
     """Call first in every tuning and eval entry point. Fails if any split file changed."""
-    split.verify(splits_dir)
-    return frozenset(r["qid"] for r in iter_jsonl(Path(splits_dir) / "test.jsonl"))
+    split.verify(splits_dir)       # hashes the bytes of every split file, interprets none of them
+    # qids from each line's raw prefix: the guard needs test ids, never test questions or gold
+    return frozenset(read_qids(Path(splits_dir) / "test.jsonl"))
 
 
 def assert_no_test(qids: Iterable[str], test_qids: frozenset[str], what: str) -> None:

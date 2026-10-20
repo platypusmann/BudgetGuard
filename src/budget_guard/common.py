@@ -4,8 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterable, Iterator
 
 ROOT = Path(os.environ.get("BG_ROOT", Path(__file__).resolve().parents[2]))
 DATA = ROOT / "data"
@@ -42,6 +43,64 @@ def iter_jsonl(path: Path) -> Iterator[dict]:
                 yield json.loads(line)
             except json.JSONDecodeError:
                 continue
+
+
+# Every cache row starts with its pid, every split and prompts row with its qid (and prompts rows
+# with the split right after). These readers decide on that raw prefix, so a line that is filtered
+# out is never JSON-decoded at all. That is how calib-and-tune-only code avoids reading test rows.
+_LEAD_ID = re.compile(r'^\{"(?:pid|qid)": "([^"]+)"')
+_LEAD_SPLIT = re.compile(r'^\{"qid": "[^"]+", "split": "([a-z]+)"')
+
+
+def lead_qid(line: str) -> str | None:
+    """qid of a cache, split or prompts line from its raw prefix, without decoding it."""
+    m = _LEAD_ID.match(line)
+    return m.group(1).split("::")[0] if m else None
+
+
+def iter_jsonl_where(path: Path, keep: Callable[[str], bool]) -> Iterator[dict]:
+    """Like iter_jsonl, but only lines whose raw text passes keep(line) are decoded."""
+    path = Path(path)
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or not keep(line):
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def only_qids(qids: Iterable[str]) -> Callable[[str], bool]:
+    qids = set(qids)
+    return lambda line: lead_qid(line) in qids
+
+
+def only_splits(splits: Iterable[str]) -> Callable[[str], bool]:
+    """For prompts.jsonl lines, which carry the split right after the qid."""
+    splits = set(splits)
+
+    def keep(line: str) -> bool:
+        m = _LEAD_SPLIT.match(line)
+        return bool(m) and m.group(1) in splits
+    return keep
+
+
+def read_qids(path: Path) -> list[str]:
+    """qids of a split file from each line's raw prefix. No row is decoded."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    out = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            q = lead_qid(line.strip())
+            if q is not None:
+                out.append(q)
+    return out
 
 
 class JsonlAppender:

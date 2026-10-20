@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import completeness, design
+from . import completeness, design, devdata
 from . import episodes as ep
 from .common import DATA, ROOT
 from .features import load_embeddings, load_features
@@ -268,7 +268,12 @@ def main(argv=None) -> None:
                          f"configs/experiment.sha256 says {design.locked_hash()}, this run is {stamp}")
 
     test_qids = verify_and_test_qids(args.data_dir / "splits")    # rule 3, first thing
-    problems, cache_report = completeness.check_cache(args.data_dir)
+    # a dry run on tune never needs test: it checks, grades, featurizes and embeds calib and tune
+    # only, into data/dev, and no test row is ever decoded (devdata.py)
+    dev = args.eval_split == "tune"
+    if dev:
+        print("DRY RUN on tune, calib and tune only. Debugging numbers, not results.")
+    problems, cache_report = completeness.check_cache(args.data_dir, splits=devdata.DEV_SPLITS if dev else None)
     print("cache completeness:\n" + completeness.describe(cache_report))
     if problems and not synthetic:
         raise SystemExit("refusing to evaluate an incomplete real cache:\n  " + "\n  ".join(problems))
@@ -281,7 +286,12 @@ def main(argv=None) -> None:
     metric = args.metric or cfg.get("metric", "lenient")
     args.out.mkdir(parents=True, exist_ok=True)
 
-    envs, sm, with_routellm = build_envs(args.data_dir, args.eval_split, metric, args.embed, test_qids)
+    feature_root = args.data_dir
+    if dev:
+        devdata.build(args.data_dir, args.embed)
+        devdata.assert_clean(args.data_dir, test_qids)
+        feature_root = devdata.dev_root(args.data_dir)
+    envs, sm, with_routellm = build_envs(feature_root, args.eval_split, metric, args.embed, test_qids)
     for s in ("calib", "tune"):
         assert_no_test(envs[s].qids, test_qids, f"{s} pool")
     print(f"evaluate on {args.eval_split} ({envs[args.eval_split].n} questions), metric {metric}, "
@@ -313,7 +323,7 @@ def main(argv=None) -> None:
         df.insert(0, "data", tag)
         df.insert(1, "design_sha256", stamp)
         df.to_csv(args.out / f"{name}.csv", index=False)
-    info = {"data": tag, "design_sha256": stamp, "design_frozen": frozen and not args.quick,
+    info = {"data": tag, "mode": "dry run on tune, debugging only" if dev else "final", "design_sha256": stamp, "design_frozen": frozen and not args.quick,
             "cache_completeness": cache_report, "data_dir": str(args.data_dir), "eval_split": args.eval_split, "metric": metric,
             "config": cfg, "signal_auc_eval": sm.auc_report(envs[args.eval_split]),
             "pool_sizes": {s: e.n for s, e in envs.items()},

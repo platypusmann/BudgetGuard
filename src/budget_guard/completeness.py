@@ -17,15 +17,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import iter_jsonl
+from .common import iter_jsonl, iter_jsonl_where, only_qids, only_splits, read_qids
 from .grade import TIERS
 from .prompts import PROMPT_VERSION
 
 
-def check_tier(cache: Path, expected: set[str]) -> dict:
+def check_tier(cache: Path, expected: set[str], qids: set[str] | None = None) -> dict:
     latest: dict[str, dict] = {}
     had_error: set[str] = set()
-    for r in iter_jsonl(cache):
+    rows = iter_jsonl(cache) if qids is None else iter_jsonl_where(cache, only_qids(qids))
+    for r in rows:
         pid = r.get("pid")
         if not pid:
             continue
@@ -44,10 +45,18 @@ def check_tier(cache: Path, expected: set[str]) -> dict:
     }
 
 
-def check_cache(data_dir: Path) -> tuple[list[str], dict]:
-    """Problems that must block a real evaluation, and the full per-tier report."""
+def check_cache(data_dir: Path, splits: tuple[str, ...] | None = None) -> tuple[list[str], dict]:
+    """Problems that must block a real evaluation, and the full per-tier report.
+
+    With splits, only those questions are checked, and no other row is decoded.
+    """
     data_dir = Path(data_dir)
-    expected = {p["pid"] for p in iter_jsonl(data_dir / "splits" / "prompts.jsonl")}
+    prompts = data_dir / "splits" / "prompts.jsonl"
+    if splits is None:
+        expected, qids = {p["pid"] for p in iter_jsonl(prompts)}, None
+    else:
+        expected = {p["pid"] for p in iter_jsonl_where(prompts, only_splits(splits))}
+        qids = {q for s in splits for q in read_qids(data_dir / "splits" / f"{s}.jsonl")}
     problems, report = [], {}
     for tier in TIERS:
         cache = data_dir / "cache" / f"{tier}.jsonl"
@@ -55,7 +64,7 @@ def check_cache(data_dir: Path) -> tuple[list[str], dict]:
             problems.append(f"{tier}: no cache file at {cache}")
             report[tier] = None
             continue
-        r = check_tier(cache, expected)
+        r = check_tier(cache, expected, qids)
         report[tier] = {k: (len(v) if isinstance(v, list) else v) for k, v in r.items()}
         for key, what in (("missing", "pids with no row"), ("unresolved", "pids whose latest row is an error"),
                           ("prompt_version", f"good rows with prompt_version other than {PROMPT_VERSION}")):

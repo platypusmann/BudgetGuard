@@ -93,7 +93,7 @@ def run(data_dir: Path = DATA, out: Path = ROOT / "results", n_boot: int = 2000,
         if not cache.exists():
             print(f"{tier}: no cache, skipped")
             continue
-        feats = {r["pid"]: r for r in latest_good_rows(cache) if r["pid"] in pids}
+        feats = {r["pid"]: r for r in latest_good_rows(cache, set(pilot)) if r["pid"] in pids}
         g = load_graded(tier, data_dir)
         g = g[g["pid"].isin(pids)].set_index("pid")
         if metric not in g:
@@ -172,7 +172,7 @@ def risk_coverage(data_dir: Path, pilot: dict, n_boot: int):
     """Tier 0 accuracy on its most confident slices, against Tier 1 and 2 on the same questions."""
     import pandas as pd
 
-    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl")}
+    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl", set(pilot))}
     graded = {}
     for tier in TIERS:
         try:
@@ -244,7 +244,7 @@ def tier0_as_probe(data_dir: Path, pilot: dict, n_boot: int):
     """AUROC of Tier 0 features for the other tiers' correctness on the raw prompt."""
     import pandas as pd
 
-    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl")}
+    feats0 = {r["pid"]: r for r in latest_good_rows(data_dir / "cache" / "tier0.jsonl", set(pilot))}
     graded = {}
     for tier in ("tier1", "tier2"):
         try:

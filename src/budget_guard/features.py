@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .common import DATA, iter_jsonl
+from .common import DATA, iter_jsonl, iter_jsonl_where, only_splits
 from .grade import TIERS, latest_good_rows, load_graded
 
 LP_KEYS = {"lp_mean": "lp_mean", "lp_min": "lp_min", "lp_sum": "lp_sum", "p_first": "p_first",
@@ -39,9 +39,9 @@ def tier_columns(k: int) -> list[str]:
     return [f"t{k}_{c}" for c in base]
 
 
-def _cache_records(cache_file: Path, k: int) -> dict[str, dict]:
+def _cache_records(cache_file: Path, k: int, qids=None) -> dict[str, dict]:
     out = {}
-    for r in latest_good_rows(cache_file):
+    for r in latest_good_rows(cache_file, qids):
         rec = {f"t{k}_present": True, f"t{k}_n_in": r.get("n_in"), f"t{k}_n_out": r.get("n_out"),
                f"t{k}_usd": r.get("usd"), f"t{k}_hit_max": r.get("finish_reason") == "length"}
         for src, dst in LP_KEYS.items():
@@ -53,21 +53,30 @@ def _cache_records(cache_file: Path, k: int) -> dict[str, dict]:
     return out
 
 
-def build_features(data_dir: Path = DATA):
+def build_features(data_dir: Path = DATA, splits: tuple[str, ...] = ("calib", "tune", "test"),
+                   out_root: Path | None = None):
+    """The feature table. With splits narrower than all three, only those questions' split rows,
+    prompts and cache rows are decoded, graded files come from out_root/graded, and the table is
+    written to out_root/features, apart from the full one."""
     import pandas as pd
 
     data_dir = Path(data_dir)
+    root = Path(out_root or data_dir)
     splits_dir = data_dir / "splits"
+    partial = set(splits) != {"calib", "tune", "test"}
     meta = {}
-    for name in ("calib", "tune", "test"):
+    for name in splits:
         for r in iter_jsonl(splits_dir / f"{name}.jsonl"):
             meta[r["qid"]] = {"question": r["question"], "is_ambiguous": r["is_ambiguous"], "n_interp": r["n_interpretations"],
                               "time_sensitive": r["time_sensitive"], "q_chars": len(r["question"]),
                               "q_words": len(r["question"].split())}
 
+    prompts = (iter_jsonl_where(splits_dir / "prompts.jsonl", only_splits(splits)) if partial
+               else iter_jsonl(splits_dir / "prompts.jsonl"))
     rows = {p["pid"]: {"pid": p["pid"], "qid": p["qid"], "variant": p["variant"], "split": p["split"],
                        "pilot": p["pilot"], **meta[p["qid"]]}
-            for p in iter_jsonl(splits_dir / "prompts.jsonl")}
+            for p in prompts}
+    qids = set(meta) if partial else None
 
     answers = {}
     for k, tier in enumerate(TIERS):
@@ -75,8 +84,8 @@ def build_features(data_dir: Path = DATA):
         if not cache_file.exists():
             print(f"{tier}: no cache, columns left empty")
             continue
-        recs = _cache_records(cache_file, k)
-        g = load_graded(tier, data_dir)
+        recs = _cache_records(cache_file, k, qids)
+        g = load_graded(tier, root)
         if len(g):
             g = g.set_index("pid")
             # graded files from before lenient_plus existed simply leave that column empty
@@ -116,7 +125,9 @@ def build_features(data_dir: Path = DATA):
     for c in df.columns:
         if df[c].dtype == "float64" and not c.endswith("_usd"):
             df[c] = df[c].astype("float32")
-    out = data_dir / "features" / "features.parquet"
+    if partial:
+        assert set(df["split"]) <= set(splits) and set(df["qid"]) <= set(meta), "a row from another split got in"
+    out = root / "features" / "features.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
     present = {t: int(df[f"t{k}_present"].sum()) for k, t in enumerate(TIERS)}
@@ -178,7 +189,8 @@ def _read_index(idx: Path) -> tuple[list[str], list[str | None]]:
     return raw["qids"], raw["text_sha1"]
 
 
-def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple[str, ...] = ALL_SPLITS) -> Path:
+def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple[str, ...] = ALL_SPLITS,
+                     out_root: Path | None = None) -> Path:
     """Embed the questions of `splits` and add them to the on-disk cache.
 
     Incremental: only questions not already cached are embedded, so a calib and tune run now and
@@ -188,8 +200,8 @@ def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple
     """
     data_dir = Path(data_dir)
     qids, texts = _questions(data_dir, splits)
-    out = data_dir / "features" / f"emb_{backend}.npy"
-    idx = data_dir / "features" / f"emb_{backend}_qids.json"
+    out = Path(out_root or data_dir) / "features" / f"emb_{backend}.npy"
+    idx = Path(out_root or data_dir) / "features" / f"emb_{backend}_qids.json"
     have_q, have_k = _read_index(idx) if out.exists() and idx.exists() else ([], [])
     keys = [_text_key(t) for t in texts]
     have = {q: (k, i) for i, (q, k) in enumerate(zip(have_q, have_k))}
@@ -213,13 +225,11 @@ def build_embeddings(data_dir: Path = DATA, backend: str = "hash", splits: tuple
 
 
 def load_embeddings(data_dir: Path = DATA, backend: str = "hash") -> dict[str, np.ndarray]:
-    """qid to vector. Falls back to building the hash embedding if nothing is cached."""
+    """qid to vector, from data_dir/features. Never builds anything, so it can't read a split by surprise."""
     data_dir = Path(data_dir)
     out = data_dir / "features" / f"emb_{backend}.npy"
     if not out.exists():
-        if backend != "hash":
-            raise FileNotFoundError(f"{out} missing. Run python -m budget_guard.features --embed {backend}")
-        build_embeddings(data_dir, "hash")
+        raise FileNotFoundError(f"{out} missing. Build it with the features stage first")
     qids, _ = _read_index(data_dir / "features" / f"emb_{backend}_qids.json")
     emb = np.load(out)
     return {q: emb[i] for i, q in enumerate(qids)}

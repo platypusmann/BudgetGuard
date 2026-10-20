@@ -33,7 +33,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
-from .common import DATA, JsonlAppender, iter_jsonl
+from .common import DATA, JsonlAppender, iter_jsonl, iter_jsonl_where, only_qids, read_qids
 
 LENIENT_SLACK = 4
 TIERS = ("tier0", "tier1", "tier2")
@@ -174,42 +174,50 @@ def grade_answer(pred: str | None, golds: list[str]) -> dict:
 
 # ---------------------------------------------------------------- cli
 
-def gold_map(splits_dir: Path) -> dict[str, list[str]]:
+def gold_map(splits_dir: Path, splits: tuple[str, ...] = SPLIT_NAMES) -> dict[str, list[str]]:
     """qid to gold aliases. About 14k short lists on the real data, a few MB."""
     out: dict[str, list[str]] = {}
-    for name in SPLIT_NAMES:
+    for name in splits:
         for row in iter_jsonl(Path(splits_dir) / f"{name}.jsonl"):
             out[row["qid"]] = row["gold"]
     return out
 
 
-def latest_good_rows(cache_file: Path) -> Iterable[dict]:
+def latest_good_rows(cache_file: Path, qids: Iterable[str] | None = None) -> Iterable[dict]:
     """Last non error row per pid, same rule cache_api uses to decide what is done.
 
-    Keeps only pid to line number in memory on the first pass, then streams again.
+    Keeps only pid to line number in memory on the first pass, then streams again. With qids,
+    rows of any other question are skipped on their raw prefix and never decoded.
     """
+    def rows():
+        return iter_jsonl(cache_file) if qids is None else iter_jsonl_where(cache_file, only_qids(qids))
+
     last: dict[str, int] = {}
-    for i, row in enumerate(iter_jsonl(cache_file)):
+    for i, row in enumerate(rows()):
         if row.get("pid") and not row.get("error"):
             last[row["pid"]] = i
     keep = set(last.values())
-    for i, row in enumerate(iter_jsonl(cache_file)):
+    for i, row in enumerate(rows()):
         if i in keep:
             yield row
 
 
-def grade_tier(tier: str, data_dir: Path = DATA, fmt: str = "parquet") -> Path | None:
+def grade_tier(tier: str, data_dir: Path = DATA, fmt: str = "parquet", splits: tuple[str, ...] = SPLIT_NAMES,
+               out_root: Path | None = None) -> Path | None:
+    """Grade one tier. With splits narrower than all three, only those questions' rows are read
+    and graded, and the result goes to out_root/graded so it never mixes with the full grading."""
     data_dir = Path(data_dir)
     cache_file = data_dir / "cache" / f"{tier}.jsonl"
     if not cache_file.exists():
         print(f"{tier}: no cache at {cache_file}, skipped")
         return None
-    golds = gold_map(data_dir / "splits")
-    out_dir = data_dir / "graded"
+    golds = gold_map(data_dir / "splits", splits)
+    qids = None if set(splits) == set(SPLIT_NAMES) else {q for s in splits for q in read_qids(data_dir / "splits" / f"{s}.jsonl")}
+    out_dir = Path(out_root or data_dir) / "graded"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows, missing_gold = [], 0
-    for r in latest_good_rows(cache_file):
+    for r in latest_good_rows(cache_file, qids):
         g = golds.get(r["qid"])
         if g is None:
             missing_gold += 1
