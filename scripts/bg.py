@@ -3,8 +3,9 @@
   python scripts/bg.py synth          build the synthetic world in data/synthetic ($0, offline)
   python scripts/bg.py grade          grade every tier cache            [--data-dir data/synthetic]
   python scripts/bg.py features       join caches into the feature table and embed questions
-  python scripts/bg.py evaluate       fit, tune, then evaluate on test, write results/ and figures
-  python scripts/bg.py report         redraw figures and the README table from results/
+  python scripts/bg.py evaluate       fit, tune, then evaluate on test, write CSVs and figures to
+                                      results/synthetic, results/dev_tune or results/final by kind of run
+  python scripts/bg.py report --out results/synthetic   redraw figures and the table for one output folder
   python scripts/bg.py test           run the offline test suite
   python scripts/bg.py synthetic      synth, grade, features, evaluate in one go
   python scripts/bg.py real           grade, features, evaluate on the real cache in data/

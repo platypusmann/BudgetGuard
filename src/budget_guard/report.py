@@ -322,7 +322,8 @@ def write_table(out: Path, metric: str | None = None) -> Path:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", type=Path, default=ROOT / "results")
+    ap.add_argument("--out", type=Path, required=True,
+                    help="an evaluate output folder, for example results/synthetic or results/final")
     args = ap.parse_args(argv)
     make_figures(args.out)
 

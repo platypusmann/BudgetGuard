@@ -97,20 +97,20 @@ This is the only step that reads the test split. It grades all three tiers, buil
   python scripts/bg.py real --minilm
   ```
 - [ ] Check the header it printed. The first line must say `code commit <hash>, tag pre-test-eval, clean`. Then `experiment design sha256 637c0563... frozen design`, and every tier COMPLETE in the cache completeness lines.
-- [ ] Check `results/run_info.json` says `"data": "REAL"` and `"design_frozen": true`, and that the figures in `results/figures` don't carry the SYNTHETIC stamp.
+- [ ] Check `results/final/run_info.json` says `"data": "REAL"` and `"design_frozen": true`, and that the figures in `results/final/figures` don't carry the SYNTHETIC stamp.
 - [ ] Read the printed ranking check (lenient against lenient_plus). Any RANKING CHANGES line goes into the write-up.
 - [ ] Pre-registered robustness check on EM, into its own folder:
   ```
-  python scripts/bg.py evaluate --metric em --embed minilm --out results/em
+  python scripts/bg.py evaluate --metric em --embed minilm --out results/final_em
   ```
 
 ## F. Write-up
 
-- [ ] Copy `results/results_table.md` into the README results section and replace the synthetic bullet points with what the real run shows. Lead with the DP against the best simple policy that can use Tier 1 (DECISIONS.md 81), not against the two-model thresholds.
+- [ ] Copy `results/final/results_table.md` into the README results section and replace the synthetic bullet points with what the real run shows. Lead with the DP against the best simple policy that can use Tier 1 (DECISIONS.md 81), not against the two-model thresholds.
 - [ ] Add a DECISIONS.md entry with the real headline numbers and anything that surprised you. If you changed anything after seeing test numbers, say so there.
 - [ ] Commit:
   ```
-  git add results README.md DECISIONS.md
+  git add results/final results/final_em README.md DECISIONS.md
   git commit -m "Real results"
   ```
 

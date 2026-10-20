@@ -43,7 +43,7 @@ Everything is fitted on calib, tuned on tune, and the test split is only read in
 
 ## Results (SYNTHETIC)
 
-![Cost versus accuracy, synthetic](results/figures/headline_cost_vs_accuracy.png)
+![Cost versus accuracy, synthetic](results/synthetic/figures/headline_cost_vs_accuracy.png)
 
 The synthetic world is calibrated to the real 300-question pilot: per-tier accuracy on clear, raw ambiguous and clarified questions, confidence AUROC around 0.7, ambiguity invisible to model signals, and a text detector near 0.65. Accuracy (lenient match, pre-registered) on the synthetic test split, 300 episodes of 100 questions over three stream seeds, clarify fee equal to one mean Tier 2 call, Tier 0 at 0.02/0.08. Budget is per question in u2, the mean Tier 2 call cost. Brackets are bootstrap 95 percent CIs over episodes. Violation rate is 0 in every row. Experiment design sha256 637c0563...27e5 (frozen).
 
@@ -83,7 +83,7 @@ What the synthetic run says, for what it's worth before real data:
 - Clarifying is hard to aim. With ambiguity nearly invisible to the model signals, the DP clarifies 15 percent of questions at 0.35 u2 with 56 percent precision and 19 percent recall. Clarifying exactly the ambiguous questions is worth 5 points over the DP at 1 u2, but it is worse than the DP at middle budgets, where forcing a clarify on every ambiguous question costs more than it returns.
 - The free text ambiguity score doesn't earn its place in the DP here. Under the frozen rule (more text bins only if they win by 0.5 points on tune) every config kept a single bin.
 
-Other figures in `results/figures`: accuracy by budget, violations and p95 spend without the guard, the clarify fee and Tier 0 price sweeps, and Tier 2 use by remaining slack. Full numbers are in `results/summary.csv` and `results/paired.csv`.
+Other figures in `results/synthetic/figures`: accuracy by budget, violations and p95 spend without the guard, and the clarify fee and Tier 0 price sweeps. Full numbers are in `results/synthetic/summary.csv` and `results/synthetic/paired.csv`. The synthetic decision logs and the Tier 2 use by slack figure were removed with the contaminated files (DECISIONS.md 101 to 108) and come back with the next synthetic run.
 
 ## Reproduce for $0
 
@@ -98,7 +98,7 @@ python scripts/bg.py synthetic     # synthetic world, grading, features, full ev
 Once the real cache is in `data/cache`, rebuilding every number and figure from it costs nothing and needs no network:
 
 ```
-python scripts/bg.py real          # grade, features, evaluate on data/, writes results/
+python scripts/bg.py real          # grade, features, evaluate on data/, writes results/final/
 ```
 
 Each stage also runs alone (`synth`, `grade`, `features`, `evaluate`, `report`). `python scripts/bg.py --help` lists them, and there's a Makefile wrapper if you have make.

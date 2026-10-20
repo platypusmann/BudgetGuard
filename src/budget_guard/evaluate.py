@@ -10,7 +10,10 @@ Order of operations, which is what keeps test clean:
   3. per (fee, price) config: fit and tune every policy on calib and tune only (asserts no test qid)
   4. only then run every policy on the evaluation split streams
 
-Outputs in --out (default results/):
+Outputs in --out. Every kind of run has its own default folder, so runs never mix:
+  results/synthetic/  synthetic data
+  results/dev_tune/   real data, dry run on tune
+  results/final/      real data, the one test evaluation (must not exist yet or be empty)
   summary.csv        one row per config x policy x budget x masked
   paired.csv         per-episode accuracy differences against every reference: threshold_fixed (the
                      pre-registered two-tier reference), threshold_tuned, threshold_three_tier and
@@ -51,6 +54,13 @@ from .signals import SignalModel
 from .synthetic import is_synthetic
 
 RESULTS = ROOT / "results"
+OUT_SYNTHETIC, OUT_DRY_RUN, OUT_FINAL = RESULTS / "synthetic", RESULTS / "dev_tune", RESULTS / "final"
+
+
+def default_out(synthetic: bool, eval_split: str) -> Path:
+    if synthetic:
+        return OUT_SYNTHETIC
+    return OUT_DRY_RUN if eval_split == "tune" else OUT_FINAL
 DECISION_LOG_POLICIES = ("threshold_fixed", "threshold_tuned", "dp_oracle", "learned_router")
 # simple policies that can use Tier 1. The best one per budget is picked on tune. Ties go to the
 # earlier, simpler one
@@ -287,7 +297,8 @@ def main(argv=None) -> None:
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=DATA)
-    ap.add_argument("--out", type=Path, default=RESULTS)
+    ap.add_argument("--out", type=Path, default=None,
+                    help="default results/synthetic, results/dev_tune or results/final by kind of run")
     ap.add_argument("--config", type=Path, default=None)
     ap.add_argument("--eval-split", choices=["test", "tune"], default="test")
     ap.add_argument("--metric", choices=["lenient", "em", "lenient_plus"], default=None)
@@ -299,6 +310,8 @@ def main(argv=None) -> None:
     t_start = time.time()
 
     synthetic = is_synthetic(args.data_dir)
+    if args.out is None:
+        args.out = default_out(synthetic, args.eval_split)
     design_sha, frozen = design.check(args.config or design.DESIGN)
     stamp = design_sha + ("+quick" if args.quick else "") + ("" if frozen else "+unfrozen")
     code = provenance.git_state()
