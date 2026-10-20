@@ -1,5 +1,11 @@
 {
   "data": "SYNTHETIC",
+  "code": {
+    "commit": "c4af881f1e8803adafb974c31fca14c9f958af0f",
+    "tag": "pre-test-eval",
+    "dirty_code": true
+  },
+  "mode": "final",
   "design_sha256": "637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5",
   "design_frozen": true,
   "cache_completeness": {
@@ -115,14 +121,15 @@
     "p_text": 0.652
   },
   "pool_sizes": {
-    "calib": 6920,
     "test": 2002,
-    "tune": 3116
+    "tune": 3116,
+    "calib": 6920
   },
+  "eval_ambiguous_rate": 0.4485514485514486,
   "dropped": {
-    "calib": 0,
     "test": 0,
-    "tune": 0
+    "tune": 0,
+    "calib": 0
   },
   "routellm": true,
   "fits": {
@@ -197,7 +204,7 @@
       "schedule_agreement": 0.794969472420811
     }
   },
-  "seconds": 329.3,
+  "seconds": 1137.2,
   "ranking_check": {
     "secondary": "lenient_plus",
     "budgets_with_changes": [],
@@ -210,6 +217,7 @@
     "learned_router": 1.026,
     "cascade_frugal": 1.01,
     "ambiguity_oracle": 1.0,
+    "threshold_three_tier": 0.987,
     "always_tier1": 0.941,
     "routellm": 0.65,
     "threshold_tuned": 0.592,

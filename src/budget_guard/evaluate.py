@@ -12,7 +12,11 @@ Order of operations, which is what keeps test clean:
 
 Outputs in --out (default results/):
   summary.csv        one row per config x policy x budget x masked
-  paired.csv         per-episode accuracy differences against threshold_fixed and threshold_tuned
+  paired.csv         per-episode accuracy differences against every reference: threshold_fixed (the
+                     pre-registered two-tier reference), threshold_tuned, threshold_three_tier and
+                     best_simple_tier1 (the best of always Tier 1, the cascade and the three-tier
+                     threshold at each budget, picked on tune, never on the evaluation split)
+  best_simple_tier1.csv  which policy was picked at each budget, with every candidate's tune score
   soft_frontier.csv  the fixed-threshold rule swept with no cap, the average-cost frontier
   metric_ranking.csv headline policy ranking under the primary metric and each secondary one,
                      same decisions rescored, with every rank change flagged
@@ -48,6 +52,11 @@ from .synthetic import is_synthetic
 
 RESULTS = ROOT / "results"
 DECISION_LOG_POLICIES = ("threshold_fixed", "threshold_tuned", "dp_oracle", "learned_router")
+# simple policies that can use Tier 1. The best one per budget is picked on tune. Ties go to the
+# earlier, simpler one
+TIER1_SIMPLE = ("always_tier1", "cascade_frugal", "threshold_three_tier")
+REFERENCES = ("threshold_fixed", "threshold_tuned", "threshold_three_tier", "best_simple_tier1")
+HEADLINE_REFS = ("threshold_fixed", "threshold_three_tier", "best_simple_tier1")
 
 
 def bootstrap_ci(x: np.ndarray, n: int, seed: int = 0) -> tuple[float, float]:
@@ -121,6 +130,26 @@ def ranking_check(summary, primary: str, other: str):
     return pd.DataFrame(rows)
 
 
+def print_headline_comparisons(paired) -> None:
+    """DP minus each headline reference at every headline budget, paired over episodes."""
+    h = paired[paired["headline"] & (paired["policy"] == "dp_oracle") & paired["reference"].isin(HEADLINE_REFS)]
+    if h.empty:
+        return
+    names = {"threshold_fixed": "fixed two-tier (pre-registered)", "threshold_three_tier": "three-tier threshold",
+             "best_simple_tier1": "best simple with Tier 1"}
+    print("\nDP minus each reference, headline config, points [paired 95 percent CI]:")
+    for b, g in h.groupby("budget_u2_per_q"):
+        cells = []
+        for ref in HEADLINE_REFS:
+            r = g[g["reference"] == ref]
+            if len(r):
+                r = r.iloc[0]
+                pick = f" ({r['reference_policy']})" if ref == "best_simple_tier1" else ""
+                cells.append(f"{names[ref]}{pick} {r['diff_mean'] * 100:+.1f} [{r['diff_ci_lo'] * 100:+.1f}, "
+                             f"{r['diff_ci_hi'] * 100:+.1f}]")
+        print(f"  {b:g} u2: " + " | ".join(cells))
+
+
 def clarify_positions(summary):
     """Place every policy between the two clarify references at each headline budget.
 
@@ -184,6 +213,12 @@ def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids,
     if verbose:
         print(f"  config fee {fee_mult}x u2, tier0 price {t0_price}: u2 = ${u2:.3e}, fee = ${fee:.3e}")
     policies = fit_all(build_all(include_routellm=with_routellm), ctx, verbose=verbose)
+    # the best simple Tier 1 policy at each budget, by accuracy on the tune streams only
+    best_simple, best_scores = {}, {}
+    for bu, B in zip(budgets_u2, budgets):
+        sc = {n: ctx.tune_score(ctx.fitted[n], B)[0] for n in TIER1_SIMPLE if n in ctx.fitted}
+        best_simple[bu] = max(sc, key=lambda n: (round(sc[n], 6), -TIER1_SIMPLE.index(n)))
+        best_scores[bu] = sc
 
     # fitting is over. From here on the evaluation split is read, nothing is fitted
     eval_eps = np.concatenate([ep.sample_episodes(ev.n, K, int(cfg["episodes_per_seed"]), s, eval_split)
@@ -208,14 +243,18 @@ def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids,
                     acc_by[(p.name, bu)] = acc_e
                 if masked and headline and bu == budgets_u2[len(budgets_u2) // 2] and p.name in DECISION_LOG_POLICIES:
                     r.log_frame(ev).to_parquet(out_dir / f"decisions_{p.name}.parquet", index=False)
-        for ref in ("threshold_fixed", "threshold_tuned"):
-            a_ref = acc_by[(ref, bu)]
+        for ref in REFERENCES:
+            ref_policy = best_simple[bu] if ref == "best_simple_tier1" else ref
+            if (ref_policy, bu) not in acc_by:
+                continue
+            a_ref = acc_by[(ref_policy, bu)]
             for p in policies:
                 if p.name == ref:
                     continue
                 d = acc_by[(p.name, bu)] - a_ref
                 lo, hi = bootstrap_ci(d, n_boot, seed=1)
-                paired_rows.append({**base, "policy": p.name, "reference": ref, "budget_u2_per_q": bu,
+                paired_rows.append({**base, "policy": p.name, "reference": ref, "reference_policy": ref_policy,
+                                    "budget_u2_per_q": bu,
                                     "budget_usd": B, "diff_mean": float(d.mean()), "diff_ci_lo": lo,
                                     "diff_ci_hi": hi, "share_episodes_better": float((d > 0).mean()),
                                     "share_episodes_worse": float((d < 0).mean())})
@@ -238,7 +277,9 @@ def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids,
               "router_model": getattr(ctx.fitted.get("learned_router"), "model_name", None),
               "router_scores": getattr(ctx.fitted.get("learned_router"), "scores", None),
               "schedule_agreement": getattr(ctx.fitted.get("slack_schedule"), "agreement", None)}
-    return rows, paired_rows, soft_rows, schedule, extras
+    best_rows = [{**base, "budget_u2_per_q": bu, "picked": best_simple[bu],
+                  **{f"tune_accuracy_{n}": v for n, v in best_scores[bu].items()}} for bu in budgets_u2]
+    return rows, paired_rows, soft_rows, schedule, extras, best_rows
 
 
 def main(argv=None) -> None:
@@ -305,13 +346,14 @@ def main(argv=None) -> None:
         configs += [(f, default_price, cfg["sweep_budgets"], False) for f in cfg["clarify_fees"] if f != default_fee]
         configs += [(default_fee, p, cfg["sweep_budgets"], False) for p in cfg["tier0_prices"] if p != default_price]
 
-    rows, paired, soft, extras = [], [], [], {}
+    rows, paired, soft, extras, best = [], [], [], {}, []
     for fee_mult, price, budgets, headline in configs:
         t = time.time()
-        r, pr, so, sched, ex = run_config(envs, args.eval_split, cfg, fee_mult, price, budgets, test_qids,
+        r, pr, so, sched, ex, be = run_config(envs, args.eval_split, cfg, fee_mult, price, budgets, test_qids,
                                           int(cfg["bootstrap"]), with_routellm, args.out, headline)
         rows += r
         paired += pr
+        best += be
         soft += so
         extras[f"fee {fee_mult} price {price[0]:g}/{price[1]:g}"] = ex
         if sched is not None:
@@ -320,7 +362,7 @@ def main(argv=None) -> None:
         print(f"  config done in {time.time() - t:.0f}s")
 
     tag = "SYNTHETIC" if synthetic else "REAL"
-    for name, data in (("summary", rows), ("paired", paired), ("soft_frontier", soft)):
+    for name, data in (("summary", rows), ("paired", paired), ("soft_frontier", soft), ("best_simple_tier1", best)):
         df = pd.DataFrame(data)
         df.insert(0, "data", tag)
         df.insert(1, "design_sha256", stamp)
@@ -332,6 +374,7 @@ def main(argv=None) -> None:
             "eval_ambiguous_rate": float(envs[args.eval_split].is_amb.mean()),
             "dropped": {s: e.n_dropped for s, e in envs.items()}, "routellm": with_routellm,
             "fits": extras, "seconds": round(time.time() - t_start, 1)}
+    print_headline_comparisons(pd.DataFrame(paired))
     other = SECONDARY.get(metric)
     summary = pd.read_csv(args.out / "summary.csv")
     rank = ranking_check(summary, metric, other) if other else None

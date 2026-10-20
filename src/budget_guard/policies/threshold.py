@@ -7,7 +7,12 @@ clarify alone is C0.
   threshold_fixed   ReDAct reference. Thresholds calibrated once on calib to fixed rates and
                     reused at every budget, fee and price. Never reads the budget.
   threshold_tuned   same rule, thresholds re-tuned on tune for each budget. Knows the budget at
-                    tuning time but not during the episode.
+                    tuning time but not during the episode. The pre-registered two-tier reference.
+  threshold_three_tier  ReDAct-style with all three tiers: Tier 1 when u is above tau1, Tier 2 when
+                    u is above tau2, with tau1 <= tau2, same signals and clarify rule as above.
+                    Both thresholds and the clarify threshold tuned on tune per budget, from the
+                    same rate grids. Added because on real data Tier 1 is nearly as good as Tier 2
+                    at a twentieth of the price, which a two-tier rule can't use.
   slack_schedule    the proposal's schedule. One small table of cuts per slack bucket, where slack
                     is remaining budget per remaining question in u2, fitted once across all
                     budgets to reproduce the DP oracle's decisions on tune streams. Each cut learns
@@ -61,6 +66,48 @@ class TunedThreshold(ThresholdRule):
     def start(self, env, episodes, B, fee) -> None:
         super().start(env, episodes, B, fee)
         self.tau, self.kappa = nearest(self.params, B)
+
+
+class ThreeTierRule(Policy):
+    """Probe Tier 0, then Tier 0, 1 or 2 by uncertainty u = 1 - p0, clarifying when p_amb > kappa."""
+
+    def __init__(self, tau1: float = np.inf, tau2: float = np.inf, kappa: float = np.inf):
+        assert tau1 <= tau2, "the Tier 2 threshold can't sit below the Tier 1 threshold"
+        self.tau1, self.tau2, self.kappa = tau1, tau2, kappa
+
+    def decide(self, step: Step) -> np.ndarray:
+        def final(st):
+            u = 1 - st.sig("p0")
+            tier = np.where(u > self.tau2, 2, np.where(u > self.tau1, 1, 0))
+            return np.where(st.sig("p_amb") > self.kappa, C0 + tier, T0 + tier)
+        return probe_then(step, final)
+
+
+def three_tier_grid(u: np.ndarray, pa: np.ndarray) -> list[tuple[float, float, float]]:
+    """Every (tau1, tau2, kappa) from the existing rate grids with tau1 <= tau2.
+
+    r1 is the share of calib questions sent past Tier 0 and r2 <= r1 the share sent on to Tier 2,
+    so tau2 = quantile(1 - r2) >= tau1 = quantile(1 - r1). r1 == r2 is the two-tier rule.
+    """
+    taus = dict(zip(ESC_RATES, quantile_thresholds(u, ESC_RATES)))
+    kappas = quantile_thresholds(pa, CLAR_RATES)
+    return [(taus[r1], taus[r2], k) for r1 in ESC_RATES for r2 in ESC_RATES if r2 <= r1 for k in kappas]
+
+
+class ThreeTierThreshold(ThreeTierRule):
+    name, label = "threshold_three_tier", "Three-tier threshold tuned per budget"
+
+    def fit(self, ctx: FitContext) -> None:
+        u = 1 - ctx.calib.signals["p0"][0]
+        pa = ctx.calib.signals["p_amb"][0]
+        grid = three_tier_grid(u, pa)
+        self.params = {}
+        for B in ctx.budgets:
+            self.params[B], _ = grid_search(ctx, lambda p: ThreeTierRule(*p), grid, B)
+
+    def start(self, env, episodes, B, fee) -> None:
+        super().start(env, episodes, B, fee)
+        self.tau1, self.tau2, self.kappa = nearest(self.params, B)
 
 
 def _p_text(step: Step) -> np.ndarray:
@@ -228,4 +275,4 @@ class SlackSchedule(Policy):
         return self._rule(bucket, 1 - step.sig("p0"), step.sig("p_amb"))
 
 
-__all__ = ["FixedThreshold", "TunedThreshold", "SlackSchedule", "ThresholdRule", "Recorder", "T1", "T2", "C1"]
+__all__ = ["FixedThreshold", "TunedThreshold", "ThreeTierThreshold", "ThreeTierRule", "SlackSchedule", "ThresholdRule", "Recorder", "T1", "T2", "C1"]

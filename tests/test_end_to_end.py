@@ -7,7 +7,7 @@ from budget_guard import evaluate
 
 POLICIES = {"always_tier0", "always_tier1", "always_tier2", "random_matched", "cascade_frugal", "threshold_fixed",
             "threshold_tuned", "slack_schedule", "dp_oracle", "learned_router", "routellm", "hindsight_oracle",
-            "clarify_all", "ambiguity_oracle"}
+            "clarify_all", "ambiguity_oracle", "threshold_three_tier"}
 
 
 def test_pipeline_produces_headline_figure(world, tmp_path):
@@ -26,7 +26,14 @@ def test_pipeline_produces_headline_figure(world, tmp_path):
     assert set(s["tier0_price"]) == {"0.02/0.08", "0/0"}
     # paired differences against both references, with CIs
     p = pd.read_csv(out / "paired.csv")
-    assert set(p["reference"]) == {"threshold_fixed", "threshold_tuned"}
+    assert set(p["reference"]) == {"threshold_fixed", "threshold_tuned", "threshold_three_tier", "best_simple_tier1"}
+    best = pd.read_csv(out / "best_simple_tier1.csv")
+    assert set(best["picked"]) <= {"always_tier1", "cascade_frugal", "threshold_three_tier"}
+    picked = p[p["reference"] == "best_simple_tier1"]["reference_policy"]
+    assert set(picked) == set(best["picked"])
+    table = (out / "results_table.md").read_text(encoding="utf-8")
+    assert "Best simple with Tier 1, picked on tune" in table and "Three-tier threshold" in table
+    assert "DP minus each reference" in table and "pre-registered reference" in table
     assert (p["diff_ci_lo"] <= p["diff_mean"] + 1e-12).all() and (p["diff_mean"] <= p["diff_ci_hi"] + 1e-12).all()
     # clarify precision and recall are reported for policies that clarify
     dp = s[(s["policy"] == "dp_oracle") & s["headline"]]

@@ -17,7 +17,7 @@ from .common import ROOT
 COLORS = {
     "dp_oracle": "#2a78d6", "learned_router": "#eb6834", "slack_schedule": "#1baf7a",
     "threshold_tuned": "#eda100", "cascade_frugal": "#e87ba4", "routellm": "#008300",
-    "threshold_fixed": "#6250d6",
+    "threshold_fixed": "#6250d6", "threshold_three_tier": "#e34948",
 }
 GRAY = {"always_tier0": "#9a9893", "always_tier1": "#7c7a75", "always_tier2": "#5d5c58",
         "random_matched": "#b5b3ad", "hindsight_oracle": "#3f3e3b", "clarify_all": "#c9c7c1",
@@ -25,6 +25,7 @@ GRAY = {"always_tier0": "#9a9893", "always_tier1": "#7c7a75", "always_tier2": "#
 LABEL = {
     "dp_oracle": "DP oracle", "learned_router": "Learned router", "slack_schedule": "Slack schedule",
     "threshold_tuned": "Threshold tuned per budget", "cascade_frugal": "FrugalGPT cascade",
+    "threshold_three_tier": "Three-tier threshold tuned per budget", "best_simple_tier1": "Best simple with Tier 1",
     "routellm": "RouteLLM-style", "threshold_fixed": "Fixed threshold (ReDAct)",
     "always_tier0": "Always Tier 0", "always_tier1": "Always Tier 1", "always_tier2": "Always Tier 2",
     "random_matched": "Random, matched spend", "hindsight_oracle": "Hindsight oracle",
@@ -32,7 +33,7 @@ LABEL = {
 }
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 TABLE_POLICIES = ["always_tier0", "always_tier1", "always_tier2", "random_matched", "threshold_fixed",
-                  "threshold_tuned", "cascade_frugal", "routellm", "slack_schedule", "learned_router",
+                  "threshold_tuned", "threshold_three_tier", "cascade_frugal", "routellm", "slack_schedule", "learned_router",
                   "dp_oracle", "clarify_all", "ambiguity_oracle", "hindsight_oracle"]
 
 
@@ -224,6 +225,35 @@ def make_figures(out: Path) -> list[Path]:
     return written
 
 
+REF_LABEL = {"threshold_fixed": "Fixed two-tier threshold (pre-registered reference)",
+             "threshold_three_tier": "Three-tier threshold tuned per budget",
+             "best_simple_tier1": "Best simple with Tier 1, picked on tune"}
+
+
+def _dp_versus_references(out: Path, pick, metric: str | None) -> list[str]:
+    """DP minus each headline reference, paired over episodes, primary metric only."""
+    import pandas as pd
+
+    path = Path(out) / "paired.csv"
+    if metric is not None or not path.exists():
+        return []
+    p = pd.read_csv(path)
+    p = p[p["headline"] & (p["policy"] == "dp_oracle") & p["reference"].isin(REF_LABEL)]
+    if p.empty:
+        return []
+    lines = ["", "DP minus each reference, accuracy points, paired bootstrap 95 percent CI over the same episodes.", "",
+             "| DP against | " + " | ".join(f"budget {b:g} u2" for b in pick) + " |", "|---|" + "---|" * len(pick)]
+    for ref, label in REF_LABEL.items():
+        cells = []
+        for b in pick:
+            r = p[(p["reference"] == ref) & np.isclose(p["budget_u2_per_q"], b)]
+            cells.append("" if not len(r) else
+                         f"{r.iloc[0]['diff_mean'] * 100:+.1f} ({r.iloc[0]['diff_ci_lo'] * 100:+.1f} to "
+                         f"{r.iloc[0]['diff_ci_hi'] * 100:+.1f})")
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def write_table(out: Path, metric: str | None = None) -> Path:
     """Markdown table of the headline config at three budgets, for the README.
 
@@ -247,7 +277,11 @@ def write_table(out: Path, metric: str | None = None) -> Path:
     code = json.loads(info_path.read_text()).get("code") if info_path.exists() else None
     lines = (["DRY RUN on the tune split: debugging numbers, not results. Keep out of the README.", ""]
              if tag == "DRY RUN" else [])
-    commit = f" Code commit {code['commit']}{' (' + code['tag'] + ')' if code.get('tag') else ''}." if code else ""
+    commit = ""
+    if code:
+        tag = f" ({code['tag']})" if code.get("tag") else ""
+        dirty = ", with uncommitted code changes" if code.get("dirty_code") else ""
+        commit = f" Code commit {code['commit']}{tag}{dirty}."
     lines += [f"Experiment design sha256 {sha}.{commit}", "",
              f"Accuracy ({label}) with bootstrap 95 percent CI, {s['data'].iloc[0]} data, "
              f"{head['eval_split'].iloc[0]} split, {int(head['n_episodes'].iloc[0])} episodes of "
@@ -265,7 +299,22 @@ def write_table(out: Path, metric: str | None = None) -> Path:
             r = r.iloc[0]
             cells.append(f"{r['accuracy']:.3f} ({r['acc_ci_lo']:.3f} to {r['acc_ci_hi']:.3f})")
         lines.append(f"| {LABEL.get(name, name)} | " + " | ".join(cells) + " |")
+    best_path = Path(out) / "best_simple_tier1.csv"
+    if best_path.exists():
+        best = pd.read_csv(best_path)
+        best = best[best["headline"]] if "headline" in best else best
+        cells = []
+        for b in pick:
+            row = best[np.isclose(best["budget_u2_per_q"], b)]
+            if not len(row):
+                cells.append("")
+                continue
+            chosen = row.iloc[0]["picked"]
+            r = head[(head["policy"] == chosen) & np.isclose(head["budget_u2_per_q"], b)].iloc[0]
+            cells.append(f"{r['accuracy']:.3f} ({r['acc_ci_lo']:.3f} to {r['acc_ci_hi']:.3f}), {LABEL.get(chosen, chosen)}")
+        lines.append("| Best simple with Tier 1, picked on tune | " + " | ".join(cells) + " |")
     assert (head["violation_rate"] == 0).all(), "a masked policy broke the cap"
+    lines += _dp_versus_references(out, pick, metric)
     p = Path(out) / ("results_table.md" if metric is None else f"results_table_{metric}.md")
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p

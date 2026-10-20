@@ -7,12 +7,12 @@ from .dp import AmbiguityOracleDP, ClarifyAllDP, DPOracle
 from .learned import LearnedRouter, RouteLLM
 from .oracle import HindsightOracle
 from .simple import AlwaysTier, RandomMatched
-from .threshold import FixedThreshold, SlackSchedule, TunedThreshold
+from .threshold import FixedThreshold, SlackSchedule, ThreeTierThreshold, TunedThreshold
 
 
 def build_all(include_routellm: bool = True) -> list[Policy]:
     out: list[Policy] = [AlwaysTier(0), AlwaysTier(1), AlwaysTier(2), FixedThreshold(), TunedThreshold(),
-                         RandomMatched(), FrugalCascade()]
+                         ThreeTierThreshold(), RandomMatched(), FrugalCascade()]
     if include_routellm:
         out.append(RouteLLM())
     out += [DPOracle(), SlackSchedule(), LearnedRouter(), ClarifyAllDP(), AmbiguityOracleDP(), HindsightOracle()]
@@ -32,6 +32,6 @@ def fit_all(policies: list[Policy], ctx: FitContext, verbose: bool = True) -> li
 
 
 __all__ = ["build_all", "fit_all", "FitContext", "Policy", "AlwaysTier", "RandomMatched", "FixedThreshold",
-           "TunedThreshold", "SlackSchedule", "FrugalCascade", "DPOracle", "AmbiguityOracleDP", "ClarifyAllDP",
+           "TunedThreshold", "ThreeTierThreshold", "SlackSchedule", "FrugalCascade", "DPOracle", "AmbiguityOracleDP", "ClarifyAllDP",
            "LearnedRouter", "RouteLLM",
            "HindsightOracle"]

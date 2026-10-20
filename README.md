@@ -27,7 +27,8 @@ Policies compared:
 - Always Tier 0, 1 or 2, the floors and ceilings
 - Random at matched spend, the signal-blind control
 - Fixed threshold, calibrated once (the ReDAct reference)
-- Threshold tuned per budget
+- Threshold tuned per budget (two tiers, Tier 0 or Tier 2, the pre-registered ReDAct-style reference)
+- Three-tier threshold tuned per budget (Tier 0, 1 or 2 by the same confidence signal)
 - FrugalGPT-style confidence cascade with a clarify gate
 - RouteLLM-style router, question embedding plus logistic regression, no probe
 - Exact DP over (questions left, budget left, signal bin), the proposal's oracle with additive reward
@@ -54,6 +55,7 @@ The synthetic world is calibrated to the real 300-question pilot: per-tier accur
 | Random, matched spend | 0.178 (0.174 to 0.182) | 0.329 (0.323 to 0.334) | 0.512 (0.506 to 0.518) |
 | Fixed threshold (ReDAct) | 0.097 (0.094 to 0.100) | 0.219 (0.215 to 0.224) | 0.223 (0.219 to 0.228) |
 | Threshold tuned per budget | 0.189 (0.185 to 0.193) | 0.346 (0.341 to 0.352) | 0.514 (0.508 to 0.520) |
+| Three-tier threshold tuned per budget | 0.189 (0.185 to 0.193) | 0.458 (0.452 to 0.464) | 0.521 (0.516 to 0.527) |
 | FrugalGPT cascade | 0.189 (0.185 to 0.193) | 0.464 (0.458 to 0.470) | 0.528 (0.523 to 0.534) |
 | RouteLLM-style | 0.208 (0.205 to 0.212) | 0.363 (0.357 to 0.368) | 0.521 (0.515 to 0.526) |
 | Slack schedule | 0.197 (0.192 to 0.201) | 0.469 (0.463 to 0.475) | 0.531 (0.525 to 0.536) |
@@ -62,11 +64,20 @@ The synthetic world is calibrated to the real 300-question pilot: per-tier accur
 | Clarify every question (blind) | 0.006 (0.006 to 0.007) | 0.179 (0.176 to 0.183) | 0.491 (0.486 to 0.497) |
 | Ambiguity oracle (clarify iff ambiguous) | 0.239 (0.235 to 0.243) | 0.461 (0.455 to 0.467) | 0.587 (0.581 to 0.592) |
 | Hindsight oracle | 0.482 (0.478 to 0.486) | 0.685 (0.679 to 0.690) | 0.685 (0.679 to 0.691) |
+| Best simple with Tier 1, picked on tune | 0.189 (0.185 to 0.193), FrugalGPT cascade | 0.458 (0.452 to 0.464), Three-tier threshold tuned per budget | 0.528 (0.523 to 0.534), FrugalGPT cascade |
+
+DP minus each reference, accuracy points, paired bootstrap 95 percent CI over the same episodes.
+
+| DP against | budget 0.02 u2 | budget 0.35 u2 | budget 1 u2 |
+|---|---|---|---|
+| Fixed two-tier threshold (pre-registered reference) | +10.1 (+9.8 to +10.5) | +25.3 (+24.6 to +25.9) | +31.2 (+30.6 to +31.8) |
+| Three-tier threshold tuned per budget | +0.9 (+0.6 to +1.2) | +1.4 (+1.2 to +1.6) | +1.4 (+1.1 to +1.7) |
+| Best simple with Tier 1, picked on tune | +0.9 (+0.6 to +1.2) | +1.4 (+1.2 to +1.6) | +0.7 (+0.4 to +1.0) |
 
 What the synthetic run says, for what it's worth before real data:
 
-- Against a fair baseline, budget-awareness buys about a point. The strongest simple policy that can use Tier 1 (always Tier 1 at tight budgets, the FrugalGPT cascade from 0.35 u2 up) is within 1 point of the DP at every budget: the DP is 0.8 points ahead at 0.35 u2 and 0.7 at 1 u2. The learned router and the slack schedule track the DP within about a point. This is the honest headline for now.
-- Against the ReDAct-style thresholds the gap looks huge (the DP beats the tuned threshold by 12.6 points at 0.35 u2, paired CI 12.1 to 13.1), but most of that is not budget-awareness. The threshold rules are two-model (Tier 0 or Tier 2), and on the pilot Tier 1 is nearly as good as Tier 2 at a twentieth of the price while Tier 0 is weak. Plain always Tier 1 beats the tuned threshold at every budget below 0.75 u2.
+- Against fair baselines, budget-awareness buys about a point. The DP beats the three-tier threshold by 0.4 to 2.0 points at every budget except 0.05 u2 (6.1), and the best simple policy that can use Tier 1, picked per budget on tune, by -0.1 to +1.4 (paired 95 percent CIs about plus or minus 0.3). The learned router and the slack schedule track the DP within about a point. This is the honest headline for now.
+- Against the pre-registered two-tier ReDAct-style reference the gap looks huge (+25.3 points at 0.35 u2), but most of that is not budget-awareness. A two-tier rule only chooses Tier 0 or Tier 2, and on the pilot Tier 1 is nearly as accurate as Tier 2 at a twentieth of the price. The three-tier threshold, the same rule with a Tier 1 step, closes almost all of that gap. Both references are reported, and the two-tier one stays the pre-registered comparison.
 - The toy's failure modes still show. The fixed threshold runs dry at tight budgets (0.097 at 0.02 u2, below always Tier 0's 0.129) and can't use money at loose ones (stuck at 0.223).
 - The guard matters. Run without masking, the fixed and tuned thresholds go over the cap in 100 percent of episodes at budgets up to 0.2 u2, with p95 spend up to 23 times the budget.
 - Clarifying is hard to aim. With ambiguity nearly invisible to the model signals, the DP clarifies 15 percent of questions at 0.35 u2 with 56 percent precision and 19 percent recall. Clarifying exactly the ambiguous questions is worth 5 points over the DP at 1 u2, but it is worse than the DP at middle budgets, where forcing a clarify on every ambiguous question costs more than it returns.
