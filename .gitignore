@@ -10,3 +10,4 @@ data/synthetic/
 data/features/
 data/graded/
 data/dev/
+.evaluate.lock

@@ -43,7 +43,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import completeness, design, devdata, provenance
+from . import completeness, design, devdata, provenance, runguard
 from . import episodes as ep
 from .common import DATA, ROOT
 from .features import load_embeddings, load_features
@@ -293,8 +293,6 @@ def run_config(envs, eval_split, cfg, fee_mult, t0_price, budgets_u2, test_qids,
 
 
 def main(argv=None) -> None:
-    import pandas as pd
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=DATA)
     ap.add_argument("--out", type=Path, default=None,
@@ -312,6 +310,16 @@ def main(argv=None) -> None:
     synthetic = is_synthetic(args.data_dir)
     if args.out is None:
         args.out = default_out(synthetic, args.eval_split)
+    # one run at a time, and a real final run only into a fresh folder of its own (runguard.py)
+    real_final = not synthetic and args.eval_split == "test"
+    with runguard.guard(args.out, real_final, other_dirs=(OUT_SYNTHETIC, OUT_DRY_RUN),
+                        what=f"evaluate {'synthetic' if synthetic else 'real'} on {args.eval_split}"):
+        _run(args, synthetic, t_start)
+
+
+def _run(args, synthetic: bool, t_start: float) -> None:
+    import pandas as pd
+
     design_sha, frozen = design.check(args.config or design.DESIGN)
     stamp = design_sha + ("+quick" if args.quick else "") + ("" if frozen else "+unfrozen")
     code = provenance.git_state()
