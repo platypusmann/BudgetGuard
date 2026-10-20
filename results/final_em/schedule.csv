@@ -1,0 +1,9 @@
+design_sha256,slack_from_u2,first_move,clarify_when,tier2_when,tier1_when,after_clarify_tier2_when,after_clarify_tier1_when,dp_decisions
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.0,P0,never,never,u > 0.986,never,never,9348
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.03,T1,never,never,u > 0.787,never,never,2436
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.06,T1,never,never,always,never,always,2127
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.1,T1,never,never,always,never,always,5224
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.2,T1,p_amb > 0.609,never,always,never,always,3833
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.35,P0,p_amb > 0.634,never,always,never,always,13577
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,0.6,P0,p_amb > 0.506,u > 0.986,always,u > 0.975,always,14548
+637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5,1.0,P0,p_amb > 0.410,u > 0.983,always,u > 0.946,always,6656

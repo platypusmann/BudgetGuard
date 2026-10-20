@@ -1,0 +1,238 @@
+{
+  "data": "REAL",
+  "code": {
+    "commit": "c0b4fa5c294ec97fde6c3e34721a5940ae1aa373",
+    "tag": null,
+    "dirty_code": false
+  },
+  "mode": "final",
+  "design_sha256": "637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5",
+  "design_frozen": true,
+  "cache_completeness": {
+    "tier0": {
+      "rows": 17959,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 0
+    },
+    "tier1": {
+      "rows": 17959,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 0
+    },
+    "tier2": {
+      "rows": 17959,
+      "missing": 0,
+      "unresolved": 0,
+      "prompt_version": 0,
+      "unknown": 0,
+      "retried": 0
+    }
+  },
+  "data_dir": "C:\\BudgetGuard\\data",
+  "eval_split": "test",
+  "metric": "em",
+  "config": {
+    "K": 100,
+    "episodes_per_seed": 100,
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "tune_episodes": 100,
+    "fit_episodes": 60,
+    "bootstrap": 1000,
+    "metric": "lenient",
+    "batch_prices": false,
+    "budgets": [
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "clarify_fees": [
+      0.5,
+      1.0,
+      2.0
+    ],
+    "tier0_prices": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.02,
+        0.08
+      ],
+      [
+        0.05,
+        0.2
+      ]
+    ],
+    "sweep_budgets": [
+      0.1,
+      0.35,
+      0.75
+    ],
+    "dp": {
+      "grid": 800,
+      "conf_bins": 8,
+      "amb_bins": 3,
+      "prior_strength": 5,
+      "text_bins": {
+        "grid": [
+          1,
+          2,
+          3
+        ],
+        "select_on": "tune",
+        "min_gain_points": 0.5
+      }
+    },
+    "fixed_threshold": {
+      "escalate_rate": 0.2,
+      "clarify_rate": 0.15
+    },
+    "slack_edges": [
+      0.0,
+      0.03,
+      0.06,
+      0.1,
+      0.2,
+      0.35,
+      0.6,
+      1.0
+    ]
+  },
+  "signal_auc_eval": {
+    "p0": 0.825,
+    "p_amb": 0.593,
+    "p1": 0.751,
+    "p_text": 0.682
+  },
+  "pool_sizes": {
+    "test": 2002,
+    "calib": 7119,
+    "tune": 2917
+  },
+  "eval_ambiguous_rate": 0.5854145854145855,
+  "dropped": {
+    "test": 0,
+    "calib": 0,
+    "tune": 0
+  },
+  "routellm": true,
+  "fits": {
+    "fee 1.0 price 0.02/0.08": {
+      "dp_text_bins": 2,
+      "dp_text_bins_tune_scores": {
+        "1": 0.36345,
+        "2": 0.36871,
+        "3": 0.36764
+      },
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.3669,
+        "mlp32": 0.3636
+      },
+      "schedule_agreement": 0.6462449566226255
+    },
+    "fee 0.5 price 0.02/0.08": {
+      "dp_text_bins": 1,
+      "dp_text_bins_tune_scores": {
+        "1": 0.4191,
+        "2": 0.42263,
+        "3": 0.4182
+      },
+      "router_model": "mlp32",
+      "router_scores": {
+        "logistic": 0.4546,
+        "mlp32": 0.4546
+      },
+      "schedule_agreement": 0.7776627984329958
+    },
+    "fee 2.0 price 0.02/0.08": {
+      "dp_text_bins": 1,
+      "dp_text_bins_tune_scores": {
+        "1": 0.37387,
+        "2": 0.37473,
+        "3": 0.37277
+      },
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.3891,
+        "mlp32": 0.3887
+      },
+      "schedule_agreement": 0.7667857957569767
+    },
+    "fee 1.0 price 0/0": {
+      "dp_text_bins": 2,
+      "dp_text_bins_tune_scores": {
+        "1": 0.3831,
+        "2": 0.391,
+        "3": 0.38823
+      },
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.4141,
+        "mlp32": 0.4089
+      },
+      "schedule_agreement": 0.6531862248002271
+    },
+    "fee 1.0 price 0.05/0.2": {
+      "dp_text_bins": 2,
+      "dp_text_bins_tune_scores": {
+        "1": 0.38223,
+        "2": 0.39017,
+        "3": 0.38847
+      },
+      "router_model": "logistic",
+      "router_scores": {
+        "logistic": 0.4118,
+        "mlp32": 0.4059
+      },
+      "schedule_agreement": 0.589539241040798
+    }
+  },
+  "seconds": 553.9,
+  "ranking_check": {
+    "secondary": "lenient",
+    "budgets_with_changes": [
+      0.02,
+      0.05,
+      0.1,
+      0.35,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "n_rank_changes": 32
+  },
+  "clarify_reference": {
+    "hindsight_oracle": 2.396,
+    "learned_router": 1.144,
+    "dp_oracle": 1.134,
+    "slack_schedule": 1.1,
+    "cascade_frugal": 1.071,
+    "threshold_three_tier": 1.068,
+    "ambiguity_oracle": 1.0,
+    "always_tier1": 0.895,
+    "routellm": 0.75,
+    "threshold_tuned": 0.622,
+    "random_matched": 0.394,
+    "always_tier2": 0.335,
+    "threshold_fixed": 0.226,
+    "clarify_all": 0.0,
+    "always_tier0": -0.283
+  }
+}

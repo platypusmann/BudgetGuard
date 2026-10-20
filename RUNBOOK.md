@@ -99,7 +99,7 @@ This is the only step that reads the test split. It grades all three tiers, buil
 - [x] Check the header it printed. The first line must say `code commit <hash>, tag pre-test-eval, clean`. Then `experiment design sha256 637c0563... frozen design`, and every tier COMPLETE in the cache completeness lines.
 - [x] Check `results/final/run_info.json` says `"data": "REAL"` and `"design_frozen": true`, and that the figures in `results/final/figures` don't carry the SYNTHETIC stamp.
 - [x] Read the printed ranking check (lenient against lenient_plus). Any RANKING CHANGES line goes into the write-up.
-- [ ] Pre-registered robustness check on EM, into its own folder:
+- [x] Pre-registered robustness check on EM, into its own folder:
   ```
   python scripts/bg.py evaluate --metric em --embed minilm --out results/final_em
   ```
