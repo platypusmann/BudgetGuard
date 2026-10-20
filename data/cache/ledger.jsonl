@@ -1,0 +1,12 @@
+{"ts": "2026-10-18T17:11:04+00:00", "tier": "tier1", "mode": "sync", "usd": 0.0021229, "n": 200}
+{"ts": "2026-10-18T17:11:34+00:00", "tier": "tier1", "mode": "sync", "usd": 0.0021058, "n": 200}
+{"ts": "2026-10-18T17:11:38+00:00", "tier": "tier1", "mode": "sync", "usd": 0.0003042, "n": 28}
+{"ts": "2026-10-18T17:12:11+00:00", "tier": "tier2", "mode": "sync", "usd": 0.040918, "n": 200}
+{"ts": "2026-10-18T17:12:41+00:00", "tier": "tier2", "mode": "sync", "usd": 0.040566, "n": 200}
+{"ts": "2026-10-18T17:12:46+00:00", "tier": "tier2", "mode": "sync", "usd": 0.005724, "n": 28}
+{"ts": "2026-10-19T05:27:20+00:00", "tier": "tier1", "task": "ambiguity", "mode": "sync", "usd": 0.0, "n": 200}
+{"ts": "2026-10-19T05:27:31+00:00", "tier": "tier1", "task": "ambiguity", "mode": "sync", "usd": 0.0, "n": 100}
+{"ts": "2026-10-19T05:29:51+00:00", "tier": "tier1", "task": "ambiguity", "mode": "sync", "usd": 0.0019821, "n": 200}
+{"ts": "2026-10-19T05:30:03+00:00", "tier": "tier1", "task": "ambiguity", "mode": "sync", "usd": 0.0009884, "n": 100}
+{"ts": "2026-10-19T15:05:18+00:00", "tier": "tier2", "task": "answer", "mode": "batch", "batch_id": "batch_6ad617864e7c8190854ec9d850954a5a", "usd": 1.787308, "n": 17531}
+{"ts": "2026-10-20T05:28:03+00:00", "tier": "tier1", "task": "answer", "mode": "batch", "batch_id": "batch_6ad6177e74308190a5e277725cca28fc", "usd": 0.09188865, "n": 17531}
