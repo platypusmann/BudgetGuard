@@ -11,3 +11,5 @@ data/features/
 data/graded/
 data/dev/
 .evaluate.lock
+results/dev_tune/
+data/cache/batches/
