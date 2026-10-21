@@ -86,7 +86,7 @@ Always go through `python scripts/bg.py`, which puts `src` on the Python path. C
 
 This is the only step that reads the test split. It grades all three tiers, builds the feature table and MiniLM embeddings (now including test), fits on calib, tunes on tune, then evaluates once on test. It refuses to run if the cache isn't complete or the design doesn't match its lock.
 
-- [x] Dry run on tune passed, calib and tune only, no test row decoded. Report in `results/dev_tune/DRY_RUN_REPORT.md` (debugging only, not results).
+- [x] Dry run on tune passed, calib and tune only, no test row decoded. Its report, `results/dev_tune/DRY_RUN_REPORT.md`, is debugging only and stays on this machine, because `results/dev_tune` isn't in the repo.
 - [x] Make sure you're on the frozen code. This must print `pre-test-eval`, and `git status --short src scripts configs tests notebooks` must print nothing:
   ```
   git describe --tags --exact-match HEAD

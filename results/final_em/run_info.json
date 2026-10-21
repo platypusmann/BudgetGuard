@@ -1,9 +1,11 @@
 {
   "data": "REAL",
   "code": {
-    "commit": "c0b4fa5c294ec97fde6c3e34721a5940ae1aa373",
+    "commit": "8aa7dca4c20ff1d450b7098f89c534eaac1c219b",
     "tag": null,
-    "dirty_code": false
+    "dirty_code": false,
+    "commit_pre_rewrite": "c0b4fa5c294ec97fde6c3e34721a5940ae1aa373",
+    "history_rewrite_note": "The history was rewritten on 2026-10-21 to fix author identities and remove some files. Code content is unchanged (the src, scripts, configs, tests and notebooks trees have identical hashes), only commit hashes changed. See DECISIONS.md 118 to 121 for the full old to new map."
   },
   "mode": "final",
   "design_sha256": "637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5",

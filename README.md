@@ -2,13 +2,13 @@
 
 A router that decides, question by question, whether to answer with a cheap model, escalate to a stronger one, or ask the user a clarifying question, while never spending more than a hard dollar cap over a stream of questions.
 
-The results below are real: Tier 0 on Kaggle, Tier 1 and Tier 2 from the OpenAI API, answers cached once and every number rebuilt from the cache for $0. The test split was evaluated exactly once, on 2026-10-20, with the code and experiment design frozen beforehand (code commit e67c5e9, tag pre-test-eval, design sha256 637c0563...27e5). The whole real run cost $1.97.
+The results below are real: Tier 0 on Kaggle, Tier 1 and Tier 2 from the OpenAI API, answers cached once and every number rebuilt from the cache for $0. The test split was evaluated in two pre-registered passes on 2026-10-20: the lenient headline first, then the EM robustness run. The first pass ran with the code and experiment design frozen beforehand (code commit a6175ad, tag pre-test-eval, design sha256 637c0563...27e5). The EM pass ran from the next commit that touched the repo, 8aa7dca, and no code changed between the two (that commit only adds the lenient results and docs, and `git diff` over `src`, `scripts`, `configs`, `tests` and `notebooks` is empty). Both hashes are the ones after the history was rewritten to fix the author identity and remove some files, and DECISIONS.md 118 to 121 maps them from the old ones (a6175ad was e67c5e9 and 8aa7dca was c0b4fa5). The whole real run cost $1.97.
 
 ## Why this exists
 
 Most routing and cascade work treats cost as something to minimize on average. Production systems usually have a cap instead: a per-request ceiling, a per-batch budget, a monthly limit that must not be crossed. A router that's right on average can still blow through the cap on a bad run of hard questions.
 
-This project extends my SIT320 research proposal (in `research/poc`). There, in a toy model, a policy that conditions on remaining budget, solved exactly by dynamic programming, beat a ReDAct-style fixed uncertainty threshold under a hard per-task cap, with zero violations. Budget Guard takes that idea to real questions, real model tiers and real prices, using AmbigNQ, where about half the questions are ambiguous, so asking the user is sometimes the right move.
+This project extends my SIT320 research proposal (summarized in `research/poc/README.md`, the proposal itself isn't in this repo). There, in a toy model, a policy that conditions on remaining budget, solved exactly by dynamic programming, beat a ReDAct-style fixed uncertainty threshold under a hard per-task cap, with zero violations. Budget Guard takes that idea to real questions, real model tiers and real prices, using AmbigNQ, where about half the questions are ambiguous, so asking the user is sometimes the right move.
 
 ## How it works
 
@@ -137,8 +137,13 @@ src/budget_guard/
 notebooks/kaggle_tier0.py   Tier 0 on a Kaggle T4, checkpointed and resumable
 scripts/bg.py               one command per stage
 tests/                      offline pytest suite
-research/poc/               the SIT320 proposal, comparison note and toy notebook
+research/poc/README.md      short summary of the SIT320 toy result
+LICENSE, DATA_LICENSE.md    MIT for the code, CC BY-SA 3.0 for the AmbigNQ-derived data
 ```
+
+## License and data
+
+The code is MIT licensed, see `LICENSE`. The questions, gold answers and interpretations come from AmbigNQ (Min et al., 2020), which is CC BY-SA 3.0, and everything built directly from them is shared under the same terms, not MIT. `DATA_LICENSE.md` has the attribution, what in the repo is derived from it, and the model terms.
 
 ## Limitations
 

@@ -1,4 +1,4 @@
-Experiment design sha256 637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5. Code commit e67c5e925702324c4eee1c375b873779e17f5f55 (pre-test-eval).
+Experiment design sha256 637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5. Code commit a6175ad2ed1d74664057dc9b93b86c3227fbbceb (pre-test-eval). Was e67c5e9 before the history rewrite, see DECISIONS.md 118 to 121.
 
 Accuracy (em, secondary, same decisions rescored) with bootstrap 95 percent CI, REAL data, test split, 300 episodes of 100 questions, clarify fee 1x u2, Tier 0 at 0.02/0.08. Budget is per question in u2, the mean Tier 2 call cost. Violation rate is 0 for every row.
 

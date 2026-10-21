@@ -289,3 +289,64 @@ Outcome: primary metric unchanged, lenient_plus stays secondary, evaluate report
 116. The pre-registered EM robustness run was done on 2026-10-20 (`python scripts/bg.py evaluate --metric em --embed minilm --out results/final_em`), into its own folder, which the run guard required to be fresh. It ran at code commit c0b4fa5, which is the commit that added the lenient results to the README. The pre-test-eval tag stays on e67c5e9, the commit behind the headline numbers. `git diff e67c5e9 c0b4fa5` has no change under src, scripts, configs, tests or notebooks, only README.md, DECISIONS.md, RUNBOOK.md and results/final, so the code is identical, and the EM run's header and run_info.json record c0b4fa5 as clean. Checks: data REAL, design frozen (637c0563...27e5), cache COMPLETE, masked violation 0 everywhere, masked spend at most 99.98 percent of B, 2,002 test questions. Every policy was refit and retuned on EM, since the metric is part of the fit, and the best-simple pick was redone on tune under EM.
 
 117. What EM showed. The DP is ahead of the best simple Tier 1 policy by 0.6 to 2.3 points at six budgets (0.02, 0.1, 0.2, 0.35, 0.5 and 1.0 u2) and not distinguishable from it at 0.05 u2 (-0.1, CI -0.3 to +0.1) and 0.75 u2 (+0.2, CI -0.1 to +0.6). The lenient run had it ahead at seven budgets, so 0.75 u2 is the one place where the metric changes the verdict from ahead to level, and the README says so. Against the three-tier threshold the lead is 0.3 to 2.3 points, with a CI that just touches zero at 0.75 u2. The learned router is within 0.7 points of the DP and slightly ahead from 0.35 u2 up, which I read as a tie and not as a win. The text-bin rule picked 2 bins at the headline config under EM, where the lenient run picked 1. That's the frozen rule scoring different tune accuracies, and it fits a text signal that adds very little. EM accuracy is about 7 to 8 points below lenient from 0.05 u2 up, the same gap the grader changes showed on the pilot. The ranking check (EM against lenient, same decisions) reshuffled many mid-table ranks, but those policies sit within about a point of each other. No conclusion in the README rests on a mid-table rank.
+
+
+## Public repo hygiene, history rewrite (2026-10-21)
+
+118. Before publishing, the git history was rewritten with git filter-repo, on Ranveer's instruction. Four things changed. First, the author and committer on all 43 commits, and the tagger on the pre-test-eval tag, went from the local git identity (the name `Ranveer` with a student-ID style address that had no domain) to `Ranveer Bhasin <platypusmann@users.noreply.github.com>`. That's GitHub's legacy noreply form, because the numeric ID form wasn't to hand. GitHub only links the legacy form to the account in some cases, so the commits may show up unlinked, and a second rewrite is the fix if that matters. Second, the two SIT320 PDFs and the toy notebook were removed from the working tree and from every commit, and `research/poc/README.md` now summarizes the toy result in my own words. Third, `results/dev_tune/` and `data/cache/batches/` (batch input files that carry OpenAI batch IDs) were purged from all history. They were copied outside the repo first and restored locally as ignored files, and `.gitignore` now lists both. Fourth, MIT `LICENSE` and `DATA_LICENSE.md` (AmbigNQ is CC BY-SA 3.0) were added. The command was:
+
+    git filter-repo --force --mailmap mailmap.txt --invert-paths \
+      --path "research/poc/SIT-320, Task 11.pdf" --path "research/poc/Comparison with Prior Work.pdf" \
+      --path research/poc/budget_aware_abstention_poc.ipynb --path results/dev_tune/ --path data/cache/batches/
+
+with a one-line mailmap that maps the old address to `Ranveer Bhasin <platypusmann@users.noreply.github.com>`. A full backup of the old history, made first with `git clone --mirror`, sits outside the repo at `C:\BudgetGuard-pre-rewrite.git`. filter-repo removes the origin remote, so I added the URL back without pushing. Nothing has been pushed, and Ranveer recreates the GitHub repo and pushes.
+
+119. Old to new commit hashes, oldest first, 7 characters each. Hashes quoted in earlier entries (for example 81, 93, 95 to 117) and in results files from before this rewrite are the old ones, so look them up here. Entry 87ec40d, mentioned in 101 to 107, was amended away before the rewrite and never had a new hash. The commit that adds these entries, and the ones around it, aren't in the table.
+
+    dc2cf6c  67247ad  Initial import: split builder, API cache, Kaggle Tier 0 notebook, smoke test
+    21f5332  1526b94  Add grade.py: SQuAD normalization, EM, token F1, lenient match, per-tier CLI
+    0ada56c  83854b0  Add synthetic.py: synthetic AmbigNQ splits and tier caches through the real code paths
+    f66c1af  3ace866  Add features.py: per-pid feature table joined across tiers, cached question embeddings
+    9c4a7a7  1c6970e  Add episodes.py: Env, seeded stream sampler, vectorized hard-cap runner with decision logs
+    a4b80e4  d9c2e3d  Add policies: baselines, threshold family, cascade, exact DP, learned router, RouteLLM, hindsight oracle
+    d4e4232  c01a995  Add evaluate.py and report.py: budget, fee and Tier 0 price sweeps with bootstrap CIs and figures
+    1a2b4ab  e73f179  Add offline pytest suite: grading, leakage, hard cap, DP monotonicity, cache resume, end to end
+    58d2aa1  98887a6  Add stage scripts, hand check, README with synthetic results and real-run cost estimate
+    a5bffa6  b15bc0d  Add RUNBOOK for the real run and finish DECISIONS log
+    35344de  80ffa4b  Kaggle notebook: recursive input globs for the deeper dataset mount path
+    d05f265  9a807b6  Freeze AmbigNQ splits
+    49fe350  8baaa4c  Runbook: route cache_api commands through scripts/bg.py so src is on the path
+    5e0bf9c  8bd7e0c  grade.py: add lenient_plus as a secondary metric (ordinals and full-date order)
+    3767320  af82d06  DECISIONS: pilot hand check result and lenient_plus as a secondary metric
+    c56f7cf  e8dd8f5  evaluate: report headline under lenient and lenient_plus, flag ranking changes
+    8fe7e97  a9a6224  Add pilot signal check on calib pilot rows, fix Windows false positive in synthetic marker
+    35e38a1  3fa8d6a  Add lenient_plus unit tests: ordinals, date orders, no partial dates, no synonyms
+    f643559  1252981  Add free text ambiguity detector (hand features, MiniLM, combined), calib to tune
+    a208b39  6f27a72  pilot-check: cross-tier answer agreement as an ambiguity predictor
+    ffbcc62  3c68017  pilot-check: Tier 0 risk-coverage by lp_min and sc_agree, against Tier 1 and 2
+    386ef51  d703982  Add clarify reference policies and the free text ambiguity signal to the DP and router
+    f0163bd  bfdc8f4  DECISIONS and README: ambiguity detection results, clarify references, probe recommendation
+    7e07fe7  ad206fa  Add optional LLM ambiguity probe (own prompt, own cache) and its comparison script
+    3d6380d  064d5ce  pilot-check: Tier 0 features as a probe for Tier 1 and Tier 2 correctness
+    b74bf8d  2893bb1  Freeze the experiment design: hashed config, lock file, frozen text-bin rule
+    e3a63b4  86d2404  evaluate: refuse an incomplete real cache (missing pids, unresolved errors, wrong prompt version)
+    2b13c3a  219b53f  Recalibrate the synthetic generator to the real pilot and rerun the synthetic evaluation
+    233962d  ee4c8f2  RUNBOOK: the real run as one checklist with exact commands, plus a completeness stage
+    3a00811  2588642  RUNBOOK: rewrite the real run as one checklist with exact Git Bash commands
+    7152d0a  d0dc181  DECISIONS: my own pilot hand count (30/30, 26/30, 27/30), tick the runbook box
+    e65ff4a  2e2aa87  Probe: raise max_completion_tokens from 2 to 16 after the API rejected the first run
+    ac08b37  856586b  Ambiguity probe pilot result: DROP (AUROC 0.594 against 0.691 for the free text detector)
+    e746b10  843d132  Real cache: Tier 0, 1 and 2 for every prompt
+    c80a7cf  3930d32  Calib-and-tune-only dry-run path: prefix-filtered readers, data/dev artifacts, no test row decoded
+    c4af881  fed6c51  Dry run on tune passed, freeze code for the test evaluation
+    b804c4f  d07eb74  Add a three-tier ReDAct-style threshold and headline comparisons against it and the best simple Tier 1 policy
+    1d3856b  fd3a7e7  DECISIONS: the accidental start of the real evaluation and what it left behind
+    d79a29b  ae91dc6  Move synthetic outputs to results/synthetic and give every kind of run its own output folder
+    fe4d742  783e024  Run guard: one evaluation at a time, a real one only into a fresh folder of its own
+    e67c5e9  a6175ad  DECISIONS: contamination fixed, results layout, run guard, explicit-path staging rule
+    c0b4fa5  8aa7dca  Real results: the one test evaluation, README, DECISIONS and runbook updated
+    1d2b9d4  ed77725  EM robustness run on the test split: same conclusions, 0.75 u2 becomes a tie
+
+120. What was checked. The frozen code commit e67c5e9 is now a6175ad, and the EM run's commit c0b4fa5 is now 8aa7dca. For e67c5e9 and for the HEAD before the rewrite (1d2b9d4, now ed77725), every file outside the removed paths has the same blob ID before and after (100 files and 142 files, with 31 removed files in each), and the five code directories src, scripts, configs, tests and notebooks have identical tree hashes at the frozen commit. So the code that produced the test numbers is byte-identical and only its hash changed. The pre-test-eval tag was moved by filter-repo onto a6175ad, with its tagger identity rewritten. I kept that tag and didn't recreate it by hand, because recreating it would stamp today's date on it and make it look as if it was made after the test evaluation. The old objects of the PDFs, the notebook and the purged files are gone from the local object store, apart from one: the slack schedule CSV from the dry run is byte-identical to `results/final/schedule.csv`, because both fitted the same schedule on the same calib and tune data, so that one blob is still in the repo under its other name. No commit, tag or reflog entry carries the old identity.
+
+121. Records updated to the new hashes, with the old ones kept. `results/final/run_info.json` and `results/final_em/run_info.json` now say `code.commit` is the new hash, with `commit_pre_rewrite` holding the old one and a note pointing here, and the first line of each results table in those two folders names the new hash and the old one. The synthetic outputs in `results/synthetic` are left as they were. They cite commits from before the freeze, and the map above covers them. The README now says the test split was evaluated in two pre-registered passes (lenient, then EM from c0b4fa5, now 8aa7dca) with no code change between them, and the code docstrings that mention the SIT320 notebook are left alone, because the code is frozen.

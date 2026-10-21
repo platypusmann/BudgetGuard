@@ -1,9 +1,11 @@
 {
   "data": "REAL",
   "code": {
-    "commit": "e67c5e925702324c4eee1c375b873779e17f5f55",
+    "commit": "a6175ad2ed1d74664057dc9b93b86c3227fbbceb",
     "tag": "pre-test-eval",
-    "dirty_code": false
+    "dirty_code": false,
+    "commit_pre_rewrite": "e67c5e925702324c4eee1c375b873779e17f5f55",
+    "history_rewrite_note": "The history was rewritten on 2026-10-21 to fix author identities and remove some files. Code content is unchanged (the src, scripts, configs, tests and notebooks trees have identical hashes), only commit hashes changed. See DECISIONS.md 118 to 121 for the full old to new map."
   },
   "mode": "final",
   "design_sha256": "637c056365be91a25d07155b63dcfe6ec2ac226afea2b970b229a0a3a2b427e5",
